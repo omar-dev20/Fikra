@@ -4,18 +4,29 @@ import path from 'path';
 import fs from 'fs';
 
 const isProduction = config.nodeEnv === 'production';
+const databaseUrl = process.env.DATABASE_URL;
+
+// Use Postgres in production OR whenever DATABASE_URL is provided
+// (e.g. on Vercel, even if NODE_ENV is not set to "production").
+const usePostgres = isProduction || Boolean(databaseUrl);
+
+if (usePostgres && !databaseUrl) {
+  throw new Error('DATABASE_URL is not set. Add it to the environment variables.');
+}
 
 // Ensure local data directory exists (only needed for SQLite/dev)
-if (!isProduction) {
+if (!usePostgres) {
   const dataDir = path.dirname(config.sqlitePath);
   if (!fs.existsSync(dataDir)) {
     fs.mkdirSync(dataDir, { recursive: true });
   }
 }
 
-export const sequelize = isProduction
-  ? new Sequelize(process.env.DATABASE_URL as string, {
+export const sequelize = usePostgres
+  ? new Sequelize(databaseUrl as string, {
       dialect: 'postgres',
+      // Makes sure the pg driver is bundled in serverless environments
+      dialectModule: require('pg'),
       dialectOptions: {
         ssl: {
           require: true,
@@ -35,8 +46,8 @@ export async function initializeDatabase() {
     await sequelize.authenticate();
     console.log('✅ Database connection established successfully.');
 
-    // Sync models in development (creates tables if they don't exist)
-    if (config.nodeEnv === 'development') {
+    // Create tables if they don't exist (safe: alter is false, nothing is changed or dropped)
+    if (config.nodeEnv === 'development' || usePostgres) {
       await sequelize.sync({ alter: false });
       console.log('✅ Database models synchronized.');
     }

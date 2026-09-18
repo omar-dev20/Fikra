@@ -20,6 +20,12 @@ import { useLang } from "@/hooks/useLang";
 
 import type { Note } from "@/types";
 
+// Speech recognition language for each app language
+const SPEECH_LANGS: Record<string, string> = {
+  ar: "ar-EG",
+  en: "en-US",
+};
+
 function NoteDetailPage() {
   const navigate = useNavigate();
   const { formatMessage } = useIntl();
@@ -77,7 +83,9 @@ function NoteDetailPage() {
     }
 
     const recognition = new SpeechRecognitionAPI();
-    recognition.lang = lang === "ar" ? "ar-EG" : "en-US";
+    // The mic listens in the language currently selected in the app:
+    // Arabic selected -> Arabic speech, English selected -> English speech.
+    recognition.lang = SPEECH_LANGS[lang] ?? "en-US";
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
@@ -125,6 +133,12 @@ function NoteDetailPage() {
       recognitionRef.current?.stop();
     };
   }, []);
+
+  // If the app language changes while recording, stop the mic so it
+  // doesn't keep listening in the previous language.
+  useEffect(() => {
+    recognitionRef.current?.stop();
+  }, [lang]);
 
   useEffect(() => {
     const fetchNote = async () => {
@@ -291,7 +305,10 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
           className="focus-plain w-full  bg-transparent text-4xl! p-2 h-15  font-bold"
         />
         {isRecording && interimText && (
-          <p className="text-sm text-muted-foreground italic animate-pulse">
+          <p
+            dir={lang === "ar" ? "rtl" : "ltr"}
+            className="text-sm text-muted-foreground italic animate-pulse"
+          >
             {interimText}
           </p>
         )}

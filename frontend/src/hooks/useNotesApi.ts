@@ -1,11 +1,13 @@
 import {useAuth} from "@clerk/react";
 import { useCallback } from "react";
+import { useIntl } from "react-intl";
 import type { Note ,CreateNoteDTO , SaveNoteDTO  } from "@/types";
+import { toast } from "sonner";
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://localhost:3001";
  function useNotesAPI() {
   const { getToken } = useAuth();
-
+  const { formatMessage } = useIntl();
   const getAllNotes = useCallback(async () => {
     const token = await getToken();
 
@@ -27,6 +29,7 @@ const API_BASE_URL =
         const token = await getToken();
         if (!token){
           console.error("No Token Found");
+          toast.error(formatMessage({ id: "header.NoToken" }));
           return null;
         }
         const response = await fetch( API_BASE_URL + "/api/notes",{

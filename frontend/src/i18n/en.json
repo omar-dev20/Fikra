@@ -2,6 +2,7 @@
   "app.title": "Fikra AI",
   "header.signIn": "Sign in",
   "header.signUp": "Sign up",
+  "header.NoToken": "No token found. Sign in first to continue",
   "home.myDrafts": "My Drafts",
   "home.addDraft": "Add new draft",
   "home.searchPlaceholder": "Search by title...",

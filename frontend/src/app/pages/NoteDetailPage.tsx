@@ -255,13 +255,28 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
       </div>
       <div className="flex justify-between items-center ">
         <div className="flex gap-2 btn-group flex-wrap  ">
-          <Button
-            onClick={handleRecordStart}
-            variant={isRecording ? "destructive" : "default"}
-          >
-            {isRecording ? <span className="animate-pulse">🔴</span> : <Mic />}
-            <span>{formatMessage({ id: isRecording ? "note.recording" : "note.speak" })}</span>
-          </Button>
+          <div className="relative group inline-block">
+            <Button
+              onClick={handleRecordStart}
+              variant={isRecording ? "destructive" : "default"}
+            >
+              {isRecording ? <span className="animate-pulse">🔴</span> : <Mic />}
+              <span>{formatMessage({ id: isRecording ? "note.recording" : "note.speak" })}</span>
+            </Button>
+            <div
+              role="tooltip"
+              className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2
+                         whitespace-nowrap rounded-md bg-black/90 dark:bg-white/90
+                         px-3 py-1.5 text-xs text-white dark:text-black
+                         opacity-0 scale-95 transition-all duration-150
+                         group-hover:opacity-100 group-hover:scale-100 z-50"
+            >
+              {formatMessage(
+                { id: "note.micTooltip" },
+                { lang: lang === "ar" ? formatMessage({ id: "lang.arabic" }) : formatMessage({ id: "lang.english" }) }
+              )}
+            </div>
+          </div>
 
           <Button onClick={handleSummarize} disabled={aiLoading !== null} variant="outline">
             <Sparkles />

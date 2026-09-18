@@ -1,0 +1,134 @@
+@import "tailwindcss";
+@variant dark (&:where(.dark, .dark *));
+
+/* تفعيل كلاس الـ dark mode في Tailwind v4 */
+/* ============================================
+   THEME CONFIGURATION (Tailwind v4)
+   ============================================ */
+@theme {
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+
+  --color-background: oklch(0.985 0 0);
+  --color-foreground: oklch(0.145 0 0);
+  --color-card: oklch(1 0 0);
+  --color-card-foreground: oklch(0.145 0 0);
+  --color-popover: oklch(1 0 0);
+  --color-popover-foreground: oklch(0.145 0 0);
+  --color-primary: oklch(0.205 0 0);
+  --color-primary-foreground: oklch(0.985 0 0);
+  --color-secondary: oklch(0.97 0 0);
+  --color-secondary-foreground: oklch(0.205 0 0);
+  --color-muted: oklch(0.97 0 0);
+  --color-muted-foreground: oklch(0.556 0 0);
+  --color-accent: oklch(0.97 0 0);
+  --color-accent-foreground: oklch(0.205 0 0);
+  --color-destructive: oklch(0.577 0.245 27.325);
+  --color-border: oklch(0.922 0 0);
+  --color-input: oklch(0.922 0 0);
+  --color-ring: oklch(0.708 0 0);
+}
+
+/* ============================================
+   BASE STYLES
+   ============================================ */
+@layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+    --color-background: oklch(0.145 0 0);
+    --color-foreground: oklch(0.985 0 0);
+    --color-card: oklch(0.205 0 0);
+    --color-card-foreground: oklch(0.985 0 0);
+    --color-popover: oklch(0.205 0 0);
+    --color-popover-foreground: oklch(0.985 0 0);
+    --color-primary: oklch(0.922 0 0);
+    --color-primary-foreground: oklch(0.205 0 0);
+    --color-secondary: oklch(0.269 0 0);
+    --color-secondary-foreground: oklch(0.985 0 0);
+    --color-muted: oklch(0.269 0 0);
+    --color-muted-foreground: oklch(0.708 0 0);
+    --color-accent: oklch(0.269 0 0);
+    --color-accent-foreground: oklch(0.985 0 0);
+    --color-destructive: oklch(0.704 0.191 22.216);
+    --color-border: oklch(1 0 0 / 10%);
+    --color-input: oklch(1 0 0 / 15%);
+    --color-ring: oklch(0.556 0 0);
+  }
+
+  * {
+    @apply border-border box-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+/* في ملف index.css */
+
+body {
+  background-color: #EFF3F5;
+  color: #111827;
+  transition: background-color 0.3s ease, color 0.3s ease;
+  margin: 0;
+  min-height: 100vh;
+  font-family: "Cairo", sans-serif;
+}
+
+/* استخدام المحدّد الصريح لتطبيق خلفية السيم المظلم */
+html.dark body,
+.dark body {
+  background-color: #000000 !important;
+  color: #ffffff !important;
+}
+
+  a, button {
+    @apply cursor-pointer;
+  }
+
+  a {
+    @apply underline-offset-4 transition-colors;
+  }
+
+  a:hover {
+    @apply underline;
+  }
+
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring/50 ring-offset-2 ring-offset-background;
+  }
+  .focus-plain:focus-visible {
+  @apply outline-none ring-0 ring-offset-0 border-none w-full  bg-transparent dark:bg-transparent;
+}
+}
+
+/* ============================================
+   GLASSMORPHISM UTILITIES
+   ============================================ */
+@layer components {
+  .glass-card {
+    @apply rounded-2xl bg-[rgba(120,120,120,0.15)] border border-black/10 dark:border-white/10 shadow-lg dark:shadow-white/7 shadow-black/7 transition duration-300 ;
+  }
+}
+
+@media (max-width: 640px) {
+  .heading {
+    
+    @apply flex-col gap-2;
+  }
+  .Input {
+    @apply m-auto;
+    width: 90%;
+    
+  }
+  .btn-group {
+    @apply flex-wrap;
+  }
+}

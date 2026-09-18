@@ -1,0 +1,37 @@
+import express, { Express } from 'express';
+import cors from 'cors';
+import { clerkMiddleware } from '@clerk/express';
+import { config } from './config/env';
+import { errorHandler } from './middlewares/errorHandler';
+import healthRouter from './routes/health';
+import authTestRouter from './routes/auth-test';
+import notesRouter from './routes/notes';
+import aiRouter from './routes/ai';
+import userRouter from './routes/user';
+
+
+export function createApp(): Express {
+  const app = express();
+
+  // Middleware
+  app.use(cors({
+    origin: config.frontendOrigin,
+    credentials: true,
+  }));
+  app.use(express.json());
+  
+  // Clerk authentication middleware
+  app.use(clerkMiddleware());
+
+  // Routes
+  app.use('/', healthRouter);
+  app.use('/api/auth', authTestRouter);
+  app.use('/api/notes', notesRouter);
+  app.use('/api/ai', aiRouter);
+  app.use('/api/user', userRouter);
+
+  // Error handling (must be last)
+  app.use(errorHandler);
+
+  return app;
+}

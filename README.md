@@ -54,7 +54,7 @@ Throughout the course, you'll implement these production-ready features:
 ## Project Structure
 
 ```
-maswada-ai/
+Fikra-ai/
 ├── backend/           # Express.js API server
 │   ├── src/
 │   │   ├── config/    # Environment configuration

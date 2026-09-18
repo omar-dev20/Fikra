@@ -14,8 +14,22 @@ export function createApp(): Express {
   const app = express();
 
   // Middleware
+  // Supports a single origin or a comma-separated list in FRONTEND_ORIGIN
+  // (e.g. "https://fikra-ochre.vercel.app,http://localhost:5173")
+  const allowedOrigins = (config.frontendOrigin || '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter(Boolean);
+
   app.use(cors({
-    origin: config.frontendOrigin,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (curl, server-to-server, mobile apps)
+      if (!origin || allowedOrigins.length === 0 || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`Not allowed by CORS: ${origin}`));
+      }
+    },
     credentials: true,
   }));
   app.use(express.json());
@@ -30,7 +44,6 @@ export function createApp(): Express {
   app.use('/api/ai', aiRouter);
   app.use('/api/user', userRouter);
 
-  // Error handling (must be last)
   app.use(errorHandler);
 
   return app;

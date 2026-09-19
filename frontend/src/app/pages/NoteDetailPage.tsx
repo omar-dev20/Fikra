@@ -63,6 +63,7 @@ function NoteDetailPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const processedResultIndexRef = useRef<Set<number>>(new Set());
 
   const handleRecordStart = () => {
     if (isRecording) {
@@ -82,6 +83,8 @@ function NoteDetailPage() {
       return;
     }
 
+    processedResultIndexRef.current = new Set();
+
     const recognition = new SpeechRecognitionAPI();
     recognition.lang = lang === "ar" ? "ar-EG" : "en-US";
     recognition.continuous = true;
@@ -94,7 +97,12 @@ function NoteDetailPage() {
 
       for (let i = event.resultIndex; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          finalText += event.results[i][0].transcript;
+          // Some browsers re-fire the same final result index more than
+          // once in continuous mode; only accept each index once.
+          if (!processedResultIndexRef.current.has(i)) {
+            processedResultIndexRef.current.add(i);
+            finalText += event.results[i][0].transcript;
+          }
         } else {
           interim += event.results[i][0].transcript;
         }
@@ -320,7 +328,7 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
   value={note?.content || ""}
   rows={30}
   onChange={handleTextareaChange}
-  dir={isArabicContent || isRtl ? "rtl" : "ltr"}
+  dir={isArabicContent ? "rtl" : "ltr"}
   className="focus-plain w-full !border-none bg-transparent dark:bg-transparent min-h-[400px]  "
 />
       </div>

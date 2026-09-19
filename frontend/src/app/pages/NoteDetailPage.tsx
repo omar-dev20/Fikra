@@ -320,7 +320,7 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
   value={note?.content || ""}
   rows={30}
   onChange={handleTextareaChange}
-  dir={isArabicContent ? "rtl" : "ltr"}
+  dir={isArabicContent || isRtl ? "rtl" : "ltr"}
   className="focus-plain w-full !border-none bg-transparent dark:bg-transparent min-h-[400px]  "
 />
       </div>

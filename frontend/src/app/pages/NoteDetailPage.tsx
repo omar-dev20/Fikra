@@ -272,6 +272,7 @@ function NoteDetailPage() {
       setIsEditing(true);
       setSaveStatus("unsaved");
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       normalizeText,
       normalizeForComparison,

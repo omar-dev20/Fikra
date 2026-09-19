@@ -7,7 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNotesAPI } from "@/hooks/useNotesApi";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import { Loader, Mic, Languages, Sparkles } from "lucide-react";
+import { Loader, Mic, Languages, Sparkles, Info } from "lucide-react";
 import { DeleteBtn } from "@/components/common/DelateBtn";
 import { toast } from "sonner";
 import AutoSave from "@/components/note/AutoSave";
@@ -35,6 +35,12 @@ function NoteDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [rewriteMode, setRewriteMode] = useState<RewriteMode>();
   const [aiLoading, setAiLoading] = useState<string | null>(null);
+
+  // Mic tooltip text, hardcoded (no translation files needed)
+  const micTooltipText =
+    lang === "ar"
+      ? "المايك بينقل صوتك للغة العربية، لو الموقع شغال إنجليزي هيتكتب الكلام إنجليزي"
+      : "The mic transcribes based on the site's current language";
 
   const handleSave = useCallback(async () => {
     if (!note) return;
@@ -255,7 +261,7 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
       </div>
       <div className="flex justify-between items-center ">
         <div className="flex gap-2 btn-group flex-wrap  ">
-          <div className="relative group inline-block">
+          <div className="inline-flex items-center gap-1">
             <Button
               onClick={handleRecordStart}
               variant={isRecording ? "destructive" : "default"}
@@ -263,19 +269,18 @@ const isArabicContent = note?.content ? /[\u0600-\u06FF]/.test(note.content) : f
               {isRecording ? <span className="animate-pulse">🔴</span> : <Mic />}
               <span>{formatMessage({ id: isRecording ? "note.recording" : "note.speak" })}</span>
             </Button>
-            <div
-              role="tooltip"
-              className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2
-                         whitespace-nowrap rounded-md bg-black/90 dark:bg-white/90
-                         px-3 py-1.5 text-xs text-white dark:text-black
-                         opacity-0 scale-95 transition-all duration-150
-                         group-hover:opacity-100 group-hover:scale-100 z-50"
+
+            {/* Info button: shows a toast with the mic explanation, works on mobile and desktop */}
+            <button
+              type="button"
+              aria-label="info"
+              onClick={() => toast.info(micTooltipText)}
+              className="flex items-center justify-center h-6 w-6 rounded-full
+                         text-muted-foreground hover:text-foreground
+                         focus:outline-none focus:ring-2 focus:ring-ring"
             >
-              {formatMessage(
-                { id: "note.micTooltip" },
-                { lang: lang === "ar" ? formatMessage({ id: "lang.arabic" }) : formatMessage({ id: "lang.english" }) }
-              )}
-            </div>
+              <Info className="h-4 w-4" />
+            </button>
           </div>
 
           <Button onClick={handleSummarize} disabled={aiLoading !== null} variant="outline">

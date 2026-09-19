@@ -128,7 +128,5 @@ html.dark body,
     width: 90%;
     
   }
-  .btn-group {
-    @apply flex-wrap;
-  }
+
 }

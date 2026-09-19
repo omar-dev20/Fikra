@@ -130,3 +130,9 @@ html.dark body,
   }
 
 }
+@media (max-width: 330px) {
+  .icon{
+    @apply hidden;
+  }
+  
+}

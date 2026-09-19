@@ -43,8 +43,19 @@ function NoteDetailPage() {
   const [isEditing, setIsEditing] = useState(false);
   const [rewriteMode, setRewriteMode] = useState<RewriteMode>();
   const [aiLoading, setAiLoading] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [interimText, setInterimText] = useState("");
 
-  // Mic tooltip text
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const shouldKeepRecordingRef = useRef(false);
+  const startingRecognitionRef = useRef(false);
+  const restartingRecognitionRef = useRef(false);
+
+  const previousFinalTextRef = useRef("");
+  const lastAddedTextRef = useRef("");
+  const accumulatedSpeechRef = useRef("");
+  const lastResultTimeRef = useRef(0);
+
   const micTooltipText =
     lang === "ar"
       ? "المايك بينقل صوتك للغة العربية، لو الموقع شغال إنجليزي هيتكتب الكلام إنجليزي"
@@ -79,54 +90,198 @@ function NoteDetailPage() {
     handleSave,
   });
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [interimText, setInterimText] = useState("");
-
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-
-  /*
-   * النص النهائي الذي تم قبوله وإضافته بالفعل إلى الـTextarea.
-   *
-   * مهم جدًا:
-   * لا نعتمد فقط على طول النص، لأن بعض متصفحات الموبايل
-   * تعيد إرسال نفس الـfinal transcript أكثر من مرة.
-   */
-  const lastFinalTextRef = useRef<string>("");
-
-  /*
-   * آخر نص كامل رجعه SpeechRecognition.
-   * نستخدمه لمقارنة النتائج الجديدة بالقديمة.
-   */
-  const previousTranscriptRef = useRef<string>("");
-
-  /*
-   * آخر نص تمت إضافته بالفعل.
-   * يستخدم لمنع تكرار نفس الجملة.
-   */
-  const lastAddedTextRef = useRef<string>("");
-
-  /*
-   * لمنع تشغيل recognition.start() أكثر من مرة
-   * خصوصًا في بعض متصفحات الموبايل.
-   */
-  const startingRecognitionRef = useRef(false);
-
-  /*
-   * تنظيف النص قبل المقارنة.
-   */
-  const normalizeSpeechText = useCallback((text: string) => {
+  const normalizeText = useCallback((text: string) => {
     return text
       .replace(/\s+/g, " ")
+      .replace(/[،,]+/g, ",")
       .trim();
   }, []);
 
-  /*
-   * معرفة هل النص الجديد يبدأ بالنص القديم.
-   */
-  const getNewTextFromTranscript = useCallback(
+  const normalizeForComparison = useCallback((text: string) => {
+    return normalizeText(text)
+      .toLowerCase()
+      .replace(/[.!؟?،,؛;:]+$/g, "")
+      .trim();
+  }, [normalizeText]);
+
+  const splitWords = useCallback(
+    (text: string) => {
+      return normalizeText(text)
+        .split(/\s+/)
+        .filter(Boolean);
+    },
+    [normalizeText]
+  );
+
+  const isSameOrRepeatedText = useCallback(
+    (existingText: string, incomingText: string) => {
+      const existing = normalizeForComparison(existingText);
+      const incoming = normalizeForComparison(incomingText);
+
+      if (!existing || !incoming) {
+        return false;
+      }
+
+      if (existing === incoming) {
+        return true;
+      }
+
+      if (existing.endsWith(incoming)) {
+        return true;
+      }
+
+      if (incoming.endsWith(existing)) {
+        return true;
+      }
+
+      if (
+        incoming.length > 20 &&
+        existing.includes(incoming)
+      ) {
+        return true;
+      }
+
+      return false;
+    },
+    [normalizeForComparison]
+  );
+
+  const removeDuplicateOverlap = useCallback(
+    (existingText: string, incomingText: string) => {
+      const existing = normalizeText(existingText);
+      const incoming = normalizeText(incomingText);
+
+      if (!existing || !incoming) {
+        return incoming;
+      }
+
+      const existingWords = splitWords(existing);
+      const incomingWords = splitWords(incoming);
+
+      if (!existingWords.length || !incomingWords.length) {
+        return incoming;
+      }
+
+      const maxOverlap = Math.min(
+        existingWords.length,
+        incomingWords.length
+      );
+
+      for (let count = maxOverlap; count >= 1; count--) {
+        const existingPart = existingWords
+          .slice(-count)
+          .join(" ");
+
+        const incomingPart = incomingWords
+          .slice(0, count)
+          .join(" ");
+
+        if (
+          normalizeForComparison(existingPart) ===
+          normalizeForComparison(incomingPart)
+        ) {
+          return incomingWords
+            .slice(count)
+            .join(" ")
+            .trim();
+        }
+      }
+
+      return incoming;
+    },
+    [normalizeText, splitWords, normalizeForComparison]
+  );
+
+  const removeRepeatedSentences = useCallback(
+    (text: string) => {
+      const normalized = normalizeText(text);
+
+      if (!normalized) {
+        return "";
+      }
+
+      const parts = normalized
+        .split(/(?<=[.!؟?])\s+/)
+        .map((part) => part.trim())
+        .filter(Boolean);
+
+      if (parts.length <= 1) {
+        return normalized;
+      }
+
+      const uniqueParts: string[] = [];
+
+      for (const part of parts) {
+        const comparison = normalizeForComparison(part);
+
+        if (!comparison) {
+          continue;
+        }
+
+        const alreadyExists = uniqueParts.some(
+          (existing) =>
+            normalizeForComparison(existing) === comparison
+        );
+
+        if (!alreadyExists) {
+          uniqueParts.push(part);
+        }
+      }
+
+      return uniqueParts.join(" ").trim();
+    },
+    [normalizeText, normalizeForComparison]
+  );
+
+  const removeRepeatedWords = useCallback(
+    (text: string) => {
+      const words = splitWords(text);
+
+      if (words.length < 2) {
+        return normalizeText(text);
+      }
+
+      const result: string[] = [];
+
+      for (let i = 0; i < words.length; i++) {
+        const current = normalizeForComparison(words[i]);
+        const previous =
+          i > 0
+            ? normalizeForComparison(words[i - 1])
+            : "";
+
+        if (current && current === previous) {
+          continue;
+        }
+
+        result.push(words[i]);
+      }
+
+      return result.join(" ").trim();
+    },
+    [splitWords, normalizeForComparison, normalizeText]
+  );
+
+  const cleanIncomingSpeech = useCallback(
+    (text: string) => {
+      let cleaned = normalizeText(text);
+
+      if (!cleaned) {
+        return "";
+      }
+
+      cleaned = removeRepeatedWords(cleaned);
+      cleaned = removeRepeatedSentences(cleaned);
+
+      return normalizeText(cleaned);
+    },
+    [normalizeText, removeRepeatedWords, removeRepeatedSentences]
+  );
+
+  const getNewSpeechPart = useCallback(
     (oldText: string, newText: string) => {
-      const oldNormalized = normalizeSpeechText(oldText);
-      const newNormalized = normalizeSpeechText(newText);
+      const oldNormalized = normalizeText(oldText);
+      const newNormalized = normalizeText(newText);
 
       if (!newNormalized) {
         return "";
@@ -136,45 +291,247 @@ function NoteDetailPage() {
         return newNormalized;
       }
 
-
       if (oldNormalized === newNormalized) {
         return "";
       }
 
-      /*
-       * البحث عن أطول جزء مشترك في نهاية القديم
-       * وبداية الجديد.
-       *
-       * هذا مفيد عندما يقوم محرك الموبايل بإعادة
-       * بناء الـtranscript بطريقة مختلفة قليلًا.
-       */
-      const maxLength = Math.min(
-        oldNormalized.length,
-        newNormalized.length
+      if (newNormalized.startsWith(oldNormalized)) {
+        return newNormalized
+          .slice(oldNormalized.length)
+          .trim();
+      }
+
+      const oldWords = splitWords(oldNormalized);
+      const newWords = splitWords(newNormalized);
+
+      const maxOverlap = Math.min(
+        oldWords.length,
+        newWords.length
       );
 
-      for (let i = maxLength; i > 0; i--) {
-        const oldSuffix = oldNormalized.slice(-i);
-        const newPrefix = newNormalized.slice(0, i);
+      for (let count = maxOverlap; count >= 1; count--) {
+        const oldPart = oldWords
+          .slice(-count)
+          .join(" ");
 
-        if (oldSuffix === newPrefix) {
-          return newNormalized.slice(i).trim();
+        const newPart = newWords
+          .slice(0, count)
+          .join(" ");
+
+        if (
+          normalizeForComparison(oldPart) ===
+          normalizeForComparison(newPart)
+        ) {
+          return newWords
+            .slice(count)
+            .join(" ")
+            .trim();
         }
       }
 
-      /*
-       * لو لم نستطع معرفة الجزء الجديد بأمان،
-       * نرجع النص الجديد كاملًا فقط إذا كان مختلفًا
-       * عن النص الذي أضفناه آخر مرة.
-       */
+      if (
+        oldNormalized.includes(newNormalized) ||
+        newNormalized.includes(oldNormalized)
+      ) {
+        return "";
+      }
+
       return newNormalized;
     },
-    [normalizeSpeechText]
+    [
+      normalizeText,
+      splitWords,
+      normalizeForComparison,
+    ]
   );
+
+  const appendSpeechText = useCallback(
+    (speechText: string) => {
+      const cleanedSpeech =
+        cleanIncomingSpeech(speechText);
+
+      if (!cleanedSpeech) {
+        return;
+      }
+
+      setNote((prev) => {
+        if (!prev) {
+          return null;
+        }
+
+        const currentContent =
+          normalizeText(prev.content || "");
+
+        const lastAdded =
+          normalizeText(lastAddedTextRef.current);
+
+        if (
+          lastAdded &&
+          isSameOrRepeatedText(
+            lastAdded,
+            cleanedSpeech
+          )
+        ) {
+          return prev;
+        }
+
+        if (
+          currentContent &&
+          isSameOrRepeatedText(
+            currentContent,
+            cleanedSpeech
+          )
+        ) {
+          return prev;
+        }
+
+        let textToAppend = cleanedSpeech;
+
+        if (currentContent) {
+          textToAppend = removeDuplicateOverlap(
+            currentContent,
+            textToAppend
+          );
+        }
+
+        textToAppend =
+          removeDuplicateOverlap(
+            accumulatedSpeechRef.current,
+            textToAppend
+          );
+
+        textToAppend =
+          cleanIncomingSpeech(textToAppend);
+
+        if (!textToAppend) {
+          return prev;
+        }
+
+        const currentWords = splitWords(
+          currentContent
+        );
+
+        const incomingWords = splitWords(
+          textToAppend
+        );
+
+        if (
+          currentWords.length > 0 &&
+          incomingWords.length > 0
+        ) {
+          const currentTail = currentWords
+            .slice(-Math.min(8, currentWords.length))
+            .join(" ");
+
+          const incomingHead = incomingWords
+            .slice(0, Math.min(8, incomingWords.length))
+            .join(" ");
+
+          if (
+            normalizeForComparison(currentTail) ===
+            normalizeForComparison(incomingHead)
+          ) {
+            textToAppend = incomingWords
+              .slice(
+                Math.min(8, incomingWords.length)
+              )
+              .join(" ");
+          }
+        }
+
+        textToAppend =
+          cleanIncomingSpeech(textToAppend);
+
+        if (!textToAppend) {
+          return prev;
+        }
+
+        accumulatedSpeechRef.current =
+          normalizeText(
+            `${accumulatedSpeechRef.current} ${textToAppend}`
+          );
+
+        lastAddedTextRef.current =
+          textToAppend;
+
+        return {
+          ...prev,
+          content: currentContent
+            ? `${currentContent} ${textToAppend}`
+            : textToAppend,
+        };
+      });
+
+      setIsEditing(true);
+      setSaveStatus("unsaved");
+    },
+    [
+      cleanIncomingSpeech,
+      normalizeText,
+      isSameOrRepeatedText,
+      removeDuplicateOverlap,
+      splitWords,
+      normalizeForComparison,
+    ]
+  );
+
+  const startRecognition = useCallback(() => {
+    if (!recognitionRef.current) {
+      return;
+    }
+
+    if (
+      startingRecognitionRef.current ||
+      restartingRecognitionRef.current
+    ) {
+      return;
+    }
+
+    startingRecognitionRef.current = true;
+
+    try {
+      recognitionRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error(
+        "Speech recognition start error:",
+        error
+      );
+
+      startingRecognitionRef.current = false;
+
+      if (shouldKeepRecordingRef.current) {
+        restartingRecognitionRef.current = true;
+
+        setTimeout(() => {
+          restartingRecognitionRef.current = false;
+
+          if (
+            shouldKeepRecordingRef.current &&
+            recognitionRef.current
+          ) {
+            startRecognition();
+          }
+        }, 400);
+      } else {
+        setIsRecording(false);
+      }
+    }
+  }, []);
 
   const handleRecordStart = () => {
     if (isRecording) {
-      recognitionRef.current?.stop();
+      shouldKeepRecordingRef.current = false;
+
+      try {
+        recognitionRef.current?.stop();
+      } catch {
+        // Ignore stop errors.
+      }
+
+      setIsRecording(false);
+      setInterimText("");
+
       return;
     }
 
@@ -187,56 +544,72 @@ function NoteDetailPage() {
       ).webkitSpeechRecognition;
 
     if (!SpeechRecognitionAPI) {
-      alert(formatMessage({ id: "note.speechUnsupported" }));
+      alert(
+        formatMessage({
+          id: "note.speechUnsupported",
+        })
+      );
+
       return;
     }
 
-    /*
-     * Reset كل بيانات التسجيل السابقة.
-     */
-    lastFinalTextRef.current = "";
-    previousTranscriptRef.current = "";
+    try {
+      recognitionRef.current?.stop();
+    } catch {
+      // Ignore previous recognition errors.
+    }
+
+    previousFinalTextRef.current = "";
     lastAddedTextRef.current = "";
+    accumulatedSpeechRef.current = "";
+    lastResultTimeRef.current = 0;
+
     setInterimText("");
 
-    const recognition = new SpeechRecognitionAPI();
+    shouldKeepRecordingRef.current = true;
+    startingRecognitionRef.current = false;
+    restartingRecognitionRef.current = false;
 
-    recognition.lang = lang === "ar" ? "ar-EG" : "en-US";
+    const recognition =
+      new SpeechRecognitionAPI();
 
-    /*
-     * continuous = true
-     * حتى يستمر التسجيل أثناء الكلام.
-     */
+    recognition.lang =
+      lang === "ar" ? "ar-EG" : "en-US";
+
     recognition.continuous = true;
-
-    /*
-     * نحتاج interim حتى يظهر الكلام المؤقت.
-     */
     recognition.interimResults = true;
-
-    /*
-     * نريد نتيجة واحدة فقط.
-     */
     recognition.maxAlternatives = 1;
 
-    recognition.onresult = (event: SpeechRecognitionEvent) => {
+    recognition.onresult = (
+      event: SpeechRecognitionEvent
+    ) => {
+      const now = Date.now();
+
+      if (
+        now - lastResultTimeRef.current <
+        30
+      ) {
+        return;
+      }
+
+      lastResultTimeRef.current = now;
+
       let fullFinalText = "";
       let interim = "";
 
-      /*
-       * مهم:
-       * نقرأ كل النتائج الموجودة حاليًا،
-       * لأن بعض متصفحات الموبايل لا ترسل فقط
-       * النتيجة الجديدة.
-       */
-      for (let i = 0; i < event.results.length; i++) {
+      for (
+        let i = 0;
+        i < event.results.length;
+        i++
+      ) {
         const result = event.results[i];
 
         if (!result || !result[0]) {
           continue;
         }
 
-        const transcript = result[0].transcript || "";
+        const transcript =
+          result[0].transcript || "";
 
         if (result.isFinal) {
           fullFinalText += ` ${transcript}`;
@@ -245,108 +618,35 @@ function NoteDetailPage() {
         }
       }
 
-      fullFinalText = normalizeSpeechText(fullFinalText);
-      interim = normalizeSpeechText(interim);
+      fullFinalText =
+        normalizeText(fullFinalText);
 
-      /*
-       * لا يوجد final text جديد.
-       */
-      if (!fullFinalText) {
-        setInterimText(interim);
-        return;
-      }
+      interim = normalizeText(interim);
 
-      const previousTranscript =
-        previousTranscriptRef.current;
-
-      /*
-       * لو نفس الـtranscript رجع مرة أخرى من الموبايل،
-       * لا نفعل أي شيء.
-       */
-      if (
-        previousTranscript &&
-        fullFinalText === previousTranscript
-      ) {
-        setInterimText(interim);
-        return;
-      }
-
-      /*
-       * استخراج الجزء الجديد فقط.
-       */
-      const newText = getNewTextFromTranscript(
-        previousTranscript,
-        fullFinalText
-      );
-
-      /*
-       * حفظ الـtranscript الحالي للمقارنة القادمة.
-       */
-      previousTranscriptRef.current = fullFinalText;
-
-      if (newText) {
-        const cleanNewText =
-          normalizeSpeechText(newText);
-
-        /*
-         * حماية إضافية:
-         *
-         * لو الموبايل أرسل نفس الجملة التي أضفناها
-         * في الحدث السابق، لا نضيفها مرة أخرى.
-         */
-        const lastAdded =
-          normalizeSpeechText(lastAddedTextRef.current);
+      if (fullFinalText) {
+        const previousFinal =
+          previousFinalTextRef.current;
 
         if (
-          cleanNewText &&
-          cleanNewText !== lastAdded
+          fullFinalText !== previousFinal
         ) {
-          setNote((prev) => {
-            if (!prev) return null;
+          const newPart =
+            getNewSpeechPart(
+              previousFinal,
+              fullFinalText
+            );
 
-            const currentContent =
-              prev.content?.trim() || "";
+          if (newPart) {
+            const cleaned =
+              cleanIncomingSpeech(newPart);
 
-            /*
-             * حماية إضافية على مستوى المحتوى نفسه.
-             *
-             * لو آخر جزء من الـTextarea بالفعل
-             * هو نفس النص القادم، لا نضيفه.
-             */
-            if (currentContent) {
-              const normalizedCurrent =
-                normalizeSpeechText(currentContent);
-
-              const normalizedNew =
-                normalizeSpeechText(cleanNewText);
-
-              if (
-                normalizedCurrent === normalizedNew ||
-                normalizedCurrent.endsWith(
-                  normalizedNew
-                )
-              ) {
-                return prev;
-              }
+            if (cleaned) {
+              appendSpeechText(cleaned);
             }
+          }
 
-            const separator =
-              currentContent.length > 0 ? " " : "";
-
-            return {
-              ...prev,
-              content:
-                currentContent +
-                separator +
-                cleanNewText,
-            };
-          });
-
-          lastAddedTextRef.current = cleanNewText;
-          lastFinalTextRef.current = fullFinalText;
-
-          setIsEditing(true);
-          setSaveStatus("unsaved");
+          previousFinalTextRef.current =
+            fullFinalText;
         }
       }
 
@@ -363,84 +663,131 @@ function NoteDetailPage() {
 
       startingRecognitionRef.current = false;
 
-      setIsRecording(false);
-      setInterimText("");
-
-      /*
-       * بعض الأخطاء طبيعية على الموبايل،
-       * لذلك لا نظهر Toast لكل خطأ.
-       */
       if (
         event.error === "not-allowed" ||
         event.error === "service-not-allowed"
       ) {
+        shouldKeepRecordingRef.current = false;
+        setIsRecording(false);
+        setInterimText("");
+
         toast.error(
           formatMessage({
             id: "note.speechUnsupported",
           })
         );
+
+        return;
+      }
+
+      if (event.error === "aborted") {
+        return;
+      }
+
+      if (
+        event.error === "no-speech" ||
+        event.error === "network" ||
+        event.error === "audio-capture"
+      ) {
+        if (
+          shouldKeepRecordingRef.current
+        ) {
+          setTimeout(() => {
+            if (
+              shouldKeepRecordingRef.current
+            ) {
+              startRecognition();
+            }
+          }, 500);
+        }
       }
     };
 
     recognition.onend = () => {
       startingRecognitionRef.current = false;
 
-      setIsRecording(false);
-      setInterimText("");
+      if (
+        shouldKeepRecordingRef.current
+      ) {
+        setIsRecording(true);
+        setInterimText("");
+
+        if (
+          restartingRecognitionRef.current
+        ) {
+          return;
+        }
+
+        restartingRecognitionRef.current = true;
+
+        setTimeout(() => {
+          restartingRecognitionRef.current = false;
+
+          if (
+            shouldKeepRecordingRef.current &&
+            recognitionRef.current === recognition
+          ) {
+            try {
+              recognition.start();
+              startingRecognitionRef.current = true;
+              setIsRecording(true);
+            } catch (error) {
+              console.error(
+                "Speech recognition restart error:",
+                error
+              );
+
+              startingRecognitionRef.current =
+                false;
+
+              if (
+                shouldKeepRecordingRef.current
+              ) {
+                setTimeout(() => {
+                  if (
+                    shouldKeepRecordingRef.current
+                  ) {
+                    startRecognition();
+                  }
+                }, 700);
+              }
+            }
+          }
+        }, 250);
+      } else {
+        setIsRecording(false);
+        setInterimText("");
+      }
     };
 
     recognitionRef.current = recognition;
 
-    /*
-     * منع start المتكرر.
-     */
-    if (startingRecognitionRef.current) {
-      return;
-    }
-
-    startingRecognitionRef.current = true;
-
-    try {
-      recognition.start();
-      setIsRecording(true);
-    } catch (error) {
-      console.error(
-        "Speech recognition start error:",
-        error
-      );
-
-      startingRecognitionRef.current = false;
-      setIsRecording(false);
-      setInterimText("");
-    }
+    startRecognition();
   };
 
-  /*
-   * تنظيف Speech Recognition عند مغادرة الصفحة.
-   */
   useEffect(() => {
     return () => {
+      shouldKeepRecordingRef.current = false;
+      startingRecognitionRef.current = false;
+      restartingRecognitionRef.current = false;
+
       try {
         recognitionRef.current?.stop();
       } catch {
-        // Ignore stop errors during unmount.
+        // Ignore cleanup errors.
       }
 
       recognitionRef.current = null;
-      startingRecognitionRef.current = false;
     };
   }, []);
 
-  /*
-   * جلب الملاحظة.
-   */
   useEffect(() => {
     const fetchNote = async () => {
       if (id) {
-        const note = await getNote(id);
+        const fetchedNote = await getNote(id);
 
-        if (note) {
-          setNote(note);
+        if (fetchedNote) {
+          setNote(fetchedNote);
         }
 
         setIsLoading(false);
@@ -450,9 +797,6 @@ function NoteDetailPage() {
     fetchNote();
   }, [id, getNote]);
 
-  /*
-   * تغيير العنوان.
-   */
   const handleChange = (
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
@@ -471,9 +815,6 @@ function NoteDetailPage() {
     setSaveStatus("unsaved");
   };
 
-  /*
-   * تغيير محتوى الملاحظة يدويًا.
-   */
   const handleTextareaChange = (
     e: React.ChangeEvent<HTMLTextAreaElement>
   ) => {
@@ -492,9 +833,6 @@ function NoteDetailPage() {
     setSaveStatus("unsaved");
   };
 
-  /*
-   * حذف الملاحظة.
-   */
   const handleDelete = async () => {
     if (!note) return;
 
@@ -511,9 +849,6 @@ function NoteDetailPage() {
     }
   };
 
-  /*
-   * تلخيص النص.
-   */
   const handleSummarize = async () => {
     if (!note?.content) {
       toast.error(
@@ -521,6 +856,7 @@ function NoteDetailPage() {
           id: "toast.noTextSummarize",
         })
       );
+
       return;
     }
 
@@ -572,9 +908,6 @@ function NoteDetailPage() {
     }
   };
 
-  /*
-   * إعادة صياغة النص.
-   */
   const handleRewrite = async (
     mode: RewriteMode
   ) => {
@@ -584,6 +917,7 @@ function NoteDetailPage() {
           id: "toast.noTextRewrite",
         })
       );
+
       return;
     }
 
@@ -636,9 +970,6 @@ function NoteDetailPage() {
     }
   };
 
-  /*
-   * ترجمة النص.
-   */
   const handleTranslate = async () => {
     if (!note?.content) {
       toast.error(
@@ -646,6 +977,7 @@ function NoteDetailPage() {
           id: "toast.noTextTranslate",
         })
       );
+
       return;
     }
 
@@ -663,17 +995,20 @@ function NoteDetailPage() {
       }
 
       const isArabic =
-        /[\u0600-\u06FF]/.test(note.content);
+        /[\u0600-\u06FF]/.test(
+          note.content
+        );
 
       const targetLang = isArabic
         ? "English"
         : "Arabic";
 
-      const translation = await translateText(
-        token,
-        note.content,
-        targetLang
-      );
+      const translation =
+        await translateText(
+          token,
+          note.content,
+          targetLang
+        );
 
       setNote((prev) =>
         prev
@@ -705,9 +1040,6 @@ function NoteDetailPage() {
     }
   };
 
-  /*
-   * Loading.
-   */
   if (isLoading && !note) {
     return (
       <div className="flex justify-center items-center py-20 w-full">
@@ -717,7 +1049,9 @@ function NoteDetailPage() {
   }
 
   const isArabicContent = note?.content
-    ? /[\u0600-\u06FF]/.test(note.content)
+    ? /[\u0600-\u06FF]/.test(
+        note.content
+      )
     : false;
 
   return (
@@ -731,7 +1065,9 @@ function NoteDetailPage() {
           >
             <ArrowLeft
               className={
-                isRtl ? "rotate-180" : ""
+                isRtl
+                  ? "rotate-180"
+                  : ""
               }
             />
 
@@ -740,7 +1076,9 @@ function NoteDetailPage() {
             })}
           </Button>
 
-          <AutoSave saveStatus={saveStatus} />
+          <AutoSave
+            saveStatus={saveStatus}
+          />
         </div>
 
         <div>
@@ -788,7 +1126,9 @@ function NoteDetailPage() {
               type="button"
               aria-label="info"
               onClick={() =>
-                toast.info(micTooltipText)
+                toast.info(
+                  micTooltipText
+                )
               }
               className="flex items-center justify-center h-6 w-6 rounded-full
                          text-muted-foreground hover:text-foreground
@@ -800,14 +1140,17 @@ function NoteDetailPage() {
 
           <Button
             onClick={handleSummarize}
-            disabled={aiLoading !== null}
+            disabled={
+              aiLoading !== null
+            }
             variant="outline"
           >
             <Sparkles />
 
             {formatMessage({
               id:
-                aiLoading === "summarize"
+                aiLoading ===
+                "summarize"
                   ? "note.summarizing"
                   : "note.summarize",
             })}
@@ -823,13 +1166,16 @@ function NoteDetailPage() {
 
           <Button
             onClick={handleTranslate}
-            disabled={aiLoading !== null}
+            disabled={
+              aiLoading !== null
+            }
           >
             <Languages />
 
             {formatMessage({
               id:
-                aiLoading === "translate"
+                aiLoading ===
+                "translate"
                   ? "note.translating"
                   : "note.translate",
             })}
@@ -847,11 +1193,12 @@ function NoteDetailPage() {
           className="focus-plain w-full bg-transparent text-4xl! p-2 h-15 font-bold"
         />
 
-        {isRecording && interimText && (
-          <p className="hidden sm:block text-sm text-muted-foreground italic animate-pulse">
-            {interimText}
-          </p>
-        )}
+        {isRecording &&
+          interimText && (
+            <p className="hidden sm:block text-sm text-muted-foreground italic animate-pulse">
+              {interimText}
+            </p>
+          )}
 
         <Textarea
           placeholder={formatMessage({
@@ -859,7 +1206,9 @@ function NoteDetailPage() {
           })}
           value={note?.content || ""}
           rows={30}
-          onChange={handleTextareaChange}
+          onChange={
+            handleTextareaChange
+          }
           dir={
             isArabicContent || isRtl
               ? "rtl"

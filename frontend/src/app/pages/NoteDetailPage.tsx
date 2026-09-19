@@ -63,7 +63,7 @@ function NoteDetailPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [interimText, setInterimText] = useState("");
   const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const processedResultIndexRef = useRef<Set<number>>(new Set());
+  const lastFinalTextRef = useRef<string>("");
 
   const handleRecordStart = () => {
     if (isRecording) {
@@ -83,7 +83,7 @@ function NoteDetailPage() {
       return;
     }
 
-    processedResultIndexRef.current = new Set();
+    lastFinalTextRef.current = "";
 
     const recognition = new SpeechRecognitionAPI();
     recognition.lang = lang === "ar" ? "ar-EG" : "en-US";
@@ -92,25 +92,26 @@ function NoteDetailPage() {
     recognition.maxAlternatives = 1;
 
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      let finalText = "";
+      // Some mobile browsers resend the entire final transcript from
+      // scratch on every event instead of just the new part, so we
+      // rebuild the full text each time and only append the new slice.
+      let fullFinalText = "";
       let interim = "";
 
-      for (let i = event.resultIndex; i < event.results.length; i++) {
+      for (let i = 0; i < event.results.length; i++) {
         if (event.results[i].isFinal) {
-          // Some browsers re-fire the same final result index more than
-          // once in continuous mode; only accept each index once.
-          if (!processedResultIndexRef.current.has(i)) {
-            processedResultIndexRef.current.add(i);
-            finalText += event.results[i][0].transcript;
-          }
+          fullFinalText += event.results[i][0].transcript;
         } else {
           interim += event.results[i][0].transcript;
         }
       }
 
-      if (finalText) {
+      if (fullFinalText.length > lastFinalTextRef.current.length) {
+        const newText = fullFinalText.slice(lastFinalTextRef.current.length);
+        lastFinalTextRef.current = fullFinalText;
+
         setNote((prev) =>
-          prev ? { ...prev, content: prev.content + " " + finalText } : null,
+          prev ? { ...prev, content: prev.content + " " + newText } : null,
         );
         setIsEditing(true);
       }

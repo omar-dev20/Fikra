@@ -7,7 +7,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNotesAPI } from "@/hooks/useNotesApi";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import { Loader, Mic, Languages, Sparkles, Info } from "lucide-react";
+import {
+  Loader,
+  Mic,
+  Languages,
+  Sparkles,
+  Info,
+} from "lucide-react";
 import { DeleteBtn } from "@/components/common/DelateBtn";
 import { toast } from "sonner";
 import AutoSave from "@/components/note/AutoSave";
@@ -41,20 +47,41 @@ function NoteDetailPage() {
   const [note, setNote] = useState<Note | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [rewriteMode, setRewriteMode] = useState<RewriteMode>();
-  const [aiLoading, setAiLoading] = useState<string | null>(null);
-  const [isRecording, setIsRecording] = useState(false);
-  const [interimText, setInterimText] = useState("");
+  const [rewriteMode, setRewriteMode] =
+    useState<RewriteMode>();
+  const [aiLoading, setAiLoading] =
+    useState<string | null>(null);
 
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
-  const shouldKeepRecordingRef = useRef(false);
-  const startingRecognitionRef = useRef(false);
-  const restartingRecognitionRef = useRef(false);
+  const [isRecording, setIsRecording] =
+    useState(false);
+  const [interimText, setInterimText] =
+    useState("");
 
-  const previousFinalTextRef = useRef("");
-  const lastAddedTextRef = useRef("");
-  const accumulatedSpeechRef = useRef("");
-  const lastResultTimeRef = useRef(0);
+  const recognitionRef =
+    useRef<SpeechRecognition | null>(null);
+
+  const shouldKeepRecordingRef =
+    useRef(false);
+
+  const startingRecognitionRef =
+    useRef(false);
+
+  const restartingRecognitionRef =
+    useRef(false);
+
+  const finalResultsRef =
+    useRef<Record<number, string>>({});
+
+  const finalResultOrderRef =
+    useRef<number[]>([]);
+
+  const lastAppendedFinalRef =
+    useRef("");
+
+  const restartTimerRef =
+    useRef<ReturnType<typeof setTimeout> | null>(
+      null
+    );
 
   const micTooltipText =
     lang === "ar"
@@ -66,7 +93,9 @@ function NoteDetailPage() {
 
     setSaveStatus("saving");
 
-    const minDelay = new Promise((resolve) => setTimeout(resolve, 500));
+    const minDelay = new Promise((resolve) =>
+      setTimeout(resolve, 500)
+    );
 
     const [updatedNote] = await Promise.all([
       saveNote(note.id, {
@@ -84,101 +113,71 @@ function NoteDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [note, saveNote]);
 
-  const { saveStatus, setSaveStatus } = useNoteSave({
-    note,
-    isEditing,
-    handleSave,
-  });
+  const { saveStatus, setSaveStatus } =
+    useNoteSave({
+      note,
+      isEditing,
+      handleSave,
+    });
 
-  const normalizeText = useCallback((text: string) => {
-    return text
-      .replace(/\s+/g, " ")
-      .replace(/[،,]+/g, ",")
-      .trim();
-  }, []);
-
-  const normalizeForComparison = useCallback((text: string) => {
-    return normalizeText(text)
-      .toLowerCase()
-      .replace(/[.!؟?،,؛;:]+$/g, "")
-      .trim();
-  }, [normalizeText]);
-
-  const splitWords = useCallback(
+  const normalizeText = useCallback(
     (text: string) => {
-      return normalizeText(text)
-        .split(/\s+/)
-        .filter(Boolean);
+      return text.replace(/\s+/g, " ").trim();
     },
-    [normalizeText]
+    []
   );
 
-  const isSameOrRepeatedText = useCallback(
-    (existingText: string, incomingText: string) => {
-      const existing = normalizeForComparison(existingText);
-      const incoming = normalizeForComparison(incomingText);
+  const normalizeForComparison =
+    useCallback(
+      (text: string) => {
+        return normalizeText(text)
+          .toLowerCase()
+          .replace(/[.!؟?،,؛;:]+$/g, "")
+          .trim();
+      },
+      [normalizeText]
+    );
 
-      if (!existing || !incoming) {
-        return false;
-      }
-
-      if (existing === incoming) {
-        return true;
-      }
-
-      if (existing.endsWith(incoming)) {
-        return true;
-      }
-
-      if (incoming.endsWith(existing)) {
-        return true;
-      }
-
-      if (
-        incoming.length > 20 &&
-        existing.includes(incoming)
-      ) {
-        return true;
-      }
-
-      return false;
-    },
-    [normalizeForComparison]
-  );
-
-  const removeDuplicateOverlap = useCallback(
-    (existingText: string, incomingText: string) => {
-      const existing = normalizeText(existingText);
-      const incoming = normalizeText(incomingText);
+  const getOverlapText = useCallback(
+    (
+      existingText: string,
+      incomingText: string
+    ) => {
+      const existing =
+        normalizeText(existingText);
+      const incoming =
+        normalizeText(incomingText);
 
       if (!existing || !incoming) {
         return incoming;
       }
 
-      const existingWords = splitWords(existing);
-      const incomingWords = splitWords(incoming);
-
-      if (!existingWords.length || !incomingWords.length) {
-        return incoming;
-      }
+      const existingWords =
+        existing.split(/\s+/);
+      const incomingWords =
+        incoming.split(/\s+/);
 
       const maxOverlap = Math.min(
         existingWords.length,
         incomingWords.length
       );
 
-      for (let count = maxOverlap; count >= 1; count--) {
-        const existingPart = existingWords
+      for (
+        let count = maxOverlap;
+        count >= 1;
+        count--
+      ) {
+        const oldPart = existingWords
           .slice(-count)
           .join(" ");
 
-        const incomingPart = incomingWords
+        const newPart = incomingWords
           .slice(0, count)
           .join(" ");
 
         if (
-          normalizeForComparison(existingPart) ===
-          normalizeForComparison(incomingPart)
+          normalizeForComparison(oldPart) ===
+          normalizeForComparison(newPart)
         ) {
           return incomingWords
             .slice(count)
@@ -189,168 +188,30 @@ function NoteDetailPage() {
 
       return incoming;
     },
-    [normalizeText, splitWords, normalizeForComparison]
-  );
-
-  const removeRepeatedSentences = useCallback(
-    (text: string) => {
-      const normalized = normalizeText(text);
-
-      if (!normalized) {
-        return "";
-      }
-
-      const parts = normalized
-        .split(/(?<=[.!؟?])\s+/)
-        .map((part) => part.trim())
-        .filter(Boolean);
-
-      if (parts.length <= 1) {
-        return normalized;
-      }
-
-      const uniqueParts: string[] = [];
-
-      for (const part of parts) {
-        const comparison = normalizeForComparison(part);
-
-        if (!comparison) {
-          continue;
-        }
-
-        const alreadyExists = uniqueParts.some(
-          (existing) =>
-            normalizeForComparison(existing) === comparison
-        );
-
-        if (!alreadyExists) {
-          uniqueParts.push(part);
-        }
-      }
-
-      return uniqueParts.join(" ").trim();
-    },
     [normalizeText, normalizeForComparison]
   );
 
-  const removeRepeatedWords = useCallback(
+  const appendFinalText = useCallback(
     (text: string) => {
-      const words = splitWords(text);
+      const cleanText =
+        normalizeText(text);
 
-      if (words.length < 2) {
-        return normalizeText(text);
+      if (!cleanText) {
+        return;
       }
 
-      const result: string[] = [];
+      const normalizedIncoming =
+        normalizeForComparison(cleanText);
 
-      for (let i = 0; i < words.length; i++) {
-        const current = normalizeForComparison(words[i]);
-        const previous =
-          i > 0
-            ? normalizeForComparison(words[i - 1])
-            : "";
-
-        if (current && current === previous) {
-          continue;
-        }
-
-        result.push(words[i]);
-      }
-
-      return result.join(" ").trim();
-    },
-    [splitWords, normalizeForComparison, normalizeText]
-  );
-
-  const cleanIncomingSpeech = useCallback(
-    (text: string) => {
-      let cleaned = normalizeText(text);
-
-      if (!cleaned) {
-        return "";
-      }
-
-      cleaned = removeRepeatedWords(cleaned);
-      cleaned = removeRepeatedSentences(cleaned);
-
-      return normalizeText(cleaned);
-    },
-    [normalizeText, removeRepeatedWords, removeRepeatedSentences]
-  );
-
-  const getNewSpeechPart = useCallback(
-    (oldText: string, newText: string) => {
-      const oldNormalized = normalizeText(oldText);
-      const newNormalized = normalizeText(newText);
-
-      if (!newNormalized) {
-        return "";
-      }
-
-      if (!oldNormalized) {
-        return newNormalized;
-      }
-
-      if (oldNormalized === newNormalized) {
-        return "";
-      }
-
-      if (newNormalized.startsWith(oldNormalized)) {
-        return newNormalized
-          .slice(oldNormalized.length)
-          .trim();
-      }
-
-      const oldWords = splitWords(oldNormalized);
-      const newWords = splitWords(newNormalized);
-
-      const maxOverlap = Math.min(
-        oldWords.length,
-        newWords.length
-      );
-
-      for (let count = maxOverlap; count >= 1; count--) {
-        const oldPart = oldWords
-          .slice(-count)
-          .join(" ");
-
-        const newPart = newWords
-          .slice(0, count)
-          .join(" ");
-
-        if (
-          normalizeForComparison(oldPart) ===
-          normalizeForComparison(newPart)
-        ) {
-          return newWords
-            .slice(count)
-            .join(" ")
-            .trim();
-        }
-      }
+      const normalizedLast =
+        normalizeForComparison(
+          lastAppendedFinalRef.current
+        );
 
       if (
-        oldNormalized.includes(newNormalized) ||
-        newNormalized.includes(oldNormalized)
+        normalizedIncoming &&
+        normalizedIncoming === normalizedLast
       ) {
-        return "";
-      }
-
-      return newNormalized;
-    },
-    [
-      normalizeText,
-      splitWords,
-      normalizeForComparison,
-    ]
-  );
-
-  const appendSpeechText = useCallback(
-    (speechText: string) => {
-      const cleanedSpeech =
-        cleanIncomingSpeech(speechText);
-
-      if (!cleanedSpeech) {
         return;
       }
 
@@ -362,127 +223,78 @@ function NoteDetailPage() {
         const currentContent =
           normalizeText(prev.content || "");
 
-        const lastAdded =
-          normalizeText(lastAddedTextRef.current);
-
-        if (
-          lastAdded &&
-          isSameOrRepeatedText(
-            lastAdded,
-            cleanedSpeech
-          )
-        ) {
-          return prev;
-        }
-
-        if (
-          currentContent &&
-          isSameOrRepeatedText(
-            currentContent,
-            cleanedSpeech
-          )
-        ) {
-          return prev;
-        }
-
-        let textToAppend = cleanedSpeech;
+        let textToAdd = cleanText;
 
         if (currentContent) {
-          textToAppend = removeDuplicateOverlap(
+          textToAdd = getOverlapText(
             currentContent,
-            textToAppend
+            textToAdd
           );
         }
 
-        textToAppend =
-          removeDuplicateOverlap(
-            accumulatedSpeechRef.current,
-            textToAppend
-          );
+        textToAdd =
+          normalizeText(textToAdd);
 
-        textToAppend =
-          cleanIncomingSpeech(textToAppend);
-
-        if (!textToAppend) {
+        if (!textToAdd) {
           return prev;
         }
 
-        const currentWords = splitWords(
-          currentContent
-        );
+        const currentNormalized =
+          normalizeForComparison(
+            currentContent
+          );
 
-        const incomingWords = splitWords(
-          textToAppend
-        );
+        const incomingNormalized =
+          normalizeForComparison(
+            textToAdd
+          );
 
         if (
-          currentWords.length > 0 &&
-          incomingWords.length > 0
+          incomingNormalized &&
+          currentNormalized.endsWith(
+            incomingNormalized
+          )
         ) {
-          const currentTail = currentWords
-            .slice(-Math.min(8, currentWords.length))
-            .join(" ");
-
-          const incomingHead = incomingWords
-            .slice(0, Math.min(8, incomingWords.length))
-            .join(" ");
-
-          if (
-            normalizeForComparison(currentTail) ===
-            normalizeForComparison(incomingHead)
-          ) {
-            textToAppend = incomingWords
-              .slice(
-                Math.min(8, incomingWords.length)
-              )
-              .join(" ");
-          }
-        }
-
-        textToAppend =
-          cleanIncomingSpeech(textToAppend);
-
-        if (!textToAppend) {
           return prev;
         }
-
-        accumulatedSpeechRef.current =
-          normalizeText(
-            `${accumulatedSpeechRef.current} ${textToAppend}`
-          );
-
-        lastAddedTextRef.current =
-          textToAppend;
 
         return {
           ...prev,
           content: currentContent
-            ? `${currentContent} ${textToAppend}`
-            : textToAppend,
+            ? `${currentContent} ${textToAdd}`
+            : textToAdd,
         };
       });
+
+      lastAppendedFinalRef.current =
+        cleanText;
 
       setIsEditing(true);
       setSaveStatus("unsaved");
     },
     [
-      cleanIncomingSpeech,
       normalizeText,
-      isSameOrRepeatedText,
-      removeDuplicateOverlap,
-      splitWords,
       normalizeForComparison,
+      getOverlapText,
     ]
   );
 
   const startRecognition = useCallback(() => {
-    if (!recognitionRef.current) {
+    const recognition =
+      recognitionRef.current;
+
+    if (!recognition) {
       return;
     }
 
     if (
-      startingRecognitionRef.current ||
-      restartingRecognitionRef.current
+      !shouldKeepRecordingRef.current
+    ) {
+      return;
+    }
+
+    if (
+      startingRecognitionRef.current
     ) {
       return;
     }
@@ -490,43 +302,63 @@ function NoteDetailPage() {
     startingRecognitionRef.current = true;
 
     try {
-      recognitionRef.current.start();
+      recognition.start();
       setIsRecording(true);
     } catch (error) {
+      startingRecognitionRef.current =
+        false;
+
       console.error(
         "Speech recognition start error:",
         error
       );
 
-      startingRecognitionRef.current = false;
+      if (
+        shouldKeepRecordingRef.current
+      ) {
+        if (
+          restartTimerRef.current
+        ) {
+          clearTimeout(
+            restartTimerRef.current
+          );
+        }
 
-      if (shouldKeepRecordingRef.current) {
-        restartingRecognitionRef.current = true;
+        restartTimerRef.current =
+          setTimeout(() => {
+            restartTimerRef.current =
+              null;
 
-        setTimeout(() => {
-          restartingRecognitionRef.current = false;
-
-          if (
-            shouldKeepRecordingRef.current &&
-            recognitionRef.current
-          ) {
-            startRecognition();
-          }
-        }, 400);
-      } else {
-        setIsRecording(false);
+            if (
+              shouldKeepRecordingRef.current
+            ) {
+              startRecognition();
+            }
+          }, 500);
       }
     }
   }, []);
 
   const handleRecordStart = () => {
     if (isRecording) {
-      shouldKeepRecordingRef.current = false;
+      shouldKeepRecordingRef.current =
+        false;
+
+      if (restartTimerRef.current) {
+        clearTimeout(
+          restartTimerRef.current
+        );
+
+        restartTimerRef.current = null;
+      }
 
       try {
         recognitionRef.current?.stop();
-      } catch {
-        // Ignore stop errors.
+      } catch (error) {
+        console.error(
+          "Speech recognition stop error:",
+          error
+        );
       }
 
       setIsRecording(false);
@@ -553,28 +385,42 @@ function NoteDetailPage() {
       return;
     }
 
+    if (restartTimerRef.current) {
+      clearTimeout(
+        restartTimerRef.current
+      );
+
+      restartTimerRef.current = null;
+    }
+
     try {
       recognitionRef.current?.stop();
     } catch {
-      // Ignore previous recognition errors.
+      // Ignore.
     }
 
-    previousFinalTextRef.current = "";
-    lastAddedTextRef.current = "";
-    accumulatedSpeechRef.current = "";
-    lastResultTimeRef.current = 0;
+    finalResultsRef.current = {};
+    finalResultOrderRef.current = [];
+    lastAppendedFinalRef.current = "";
+
+    startingRecognitionRef.current =
+      false;
+
+    restartingRecognitionRef.current =
+      false;
+
+    shouldKeepRecordingRef.current =
+      true;
 
     setInterimText("");
-
-    shouldKeepRecordingRef.current = true;
-    startingRecognitionRef.current = false;
-    restartingRecognitionRef.current = false;
 
     const recognition =
       new SpeechRecognitionAPI();
 
     recognition.lang =
-      lang === "ar" ? "ar-EG" : "en-US";
+      lang === "ar"
+        ? "ar-EG"
+        : "en-US";
 
     recognition.continuous = true;
     recognition.interimResults = true;
@@ -583,74 +429,122 @@ function NoteDetailPage() {
     recognition.onresult = (
       event: SpeechRecognitionEvent
     ) => {
-      const now = Date.now();
-
-      if (
-        now - lastResultTimeRef.current <
-        30
-      ) {
-        return;
-      }
-
-      lastResultTimeRef.current = now;
-
-      let fullFinalText = "";
       let interim = "";
 
+      const startIndex =
+        Math.max(
+          0,
+          event.resultIndex
+        );
+
       for (
-        let i = 0;
+        let i = startIndex;
         i < event.results.length;
         i++
       ) {
-        const result = event.results[i];
+        const result =
+          event.results[i];
 
-        if (!result || !result[0]) {
+        if (
+          !result ||
+          !result[0]
+        ) {
           continue;
         }
 
         const transcript =
-          result[0].transcript || "";
+          normalizeText(
+            result[0].transcript || ""
+          );
+
+        if (!transcript) {
+          continue;
+        }
 
         if (result.isFinal) {
-          fullFinalText += ` ${transcript}`;
+          const previous =
+            finalResultsRef.current[i];
+
+          const currentNormalized =
+            normalizeForComparison(
+              transcript
+            );
+
+          const previousNormalized =
+            normalizeForComparison(
+              previous || ""
+            );
+
+          if (
+            previous &&
+            currentNormalized ===
+              previousNormalized
+          ) {
+            continue;
+          }
+
+          if (
+            previous &&
+            transcript.startsWith(
+              previous
+            )
+          ) {
+            const difference =
+              transcript
+                .slice(previous.length)
+                .trim();
+
+            finalResultsRef.current[i] =
+              transcript;
+
+            if (difference) {
+              appendFinalText(
+                difference
+              );
+            }
+          } else if (!previous) {
+            finalResultsRef.current[i] =
+              transcript;
+
+            finalResultOrderRef.current.push(
+              i
+            );
+
+            appendFinalText(
+              transcript
+            );
+          } else {
+            finalResultsRef.current[i] =
+              transcript;
+
+            const overlap =
+              getOverlapText(
+                previous,
+                transcript
+              );
+
+            if (
+              overlap &&
+              normalizeForComparison(
+                overlap
+              ) !==
+                normalizeForComparison(
+                  previous
+                )
+            ) {
+              appendFinalText(
+                overlap
+              );
+            }
+          }
         } else {
           interim += ` ${transcript}`;
         }
       }
 
-      fullFinalText =
-        normalizeText(fullFinalText);
-
-      interim = normalizeText(interim);
-
-      if (fullFinalText) {
-        const previousFinal =
-          previousFinalTextRef.current;
-
-        if (
-          fullFinalText !== previousFinal
-        ) {
-          const newPart =
-            getNewSpeechPart(
-              previousFinal,
-              fullFinalText
-            );
-
-          if (newPart) {
-            const cleaned =
-              cleanIncomingSpeech(newPart);
-
-            if (cleaned) {
-              appendSpeechText(cleaned);
-            }
-          }
-
-          previousFinalTextRef.current =
-            fullFinalText;
-        }
-      }
-
-      setInterimText(interim);
+      setInterimText(
+        normalizeText(interim)
+      );
     };
 
     recognition.onerror = (
@@ -661,13 +555,18 @@ function NoteDetailPage() {
         event.error
       );
 
-      startingRecognitionRef.current = false;
+      startingRecognitionRef.current =
+        false;
 
       if (
-        event.error === "not-allowed" ||
-        event.error === "service-not-allowed"
+        event.error ===
+          "not-allowed" ||
+        event.error ===
+          "service-not-allowed"
       ) {
-        shouldKeepRecordingRef.current = false;
+        shouldKeepRecordingRef.current =
+          false;
+
         setIsRecording(false);
         setInterimText("");
 
@@ -680,101 +579,95 @@ function NoteDetailPage() {
         return;
       }
 
-      if (event.error === "aborted") {
-        return;
-      }
-
       if (
-        event.error === "no-speech" ||
-        event.error === "network" ||
-        event.error === "audio-capture"
+        event.error ===
+          "no-speech" ||
+        event.error ===
+          "network" ||
+        event.error ===
+          "audio-capture"
       ) {
-        if (
+        setIsRecording(
           shouldKeepRecordingRef.current
-        ) {
-          setTimeout(() => {
-            if (
-              shouldKeepRecordingRef.current
-            ) {
-              startRecognition();
-            }
-          }, 500);
-        }
+        );
       }
     };
 
     recognition.onend = () => {
-      startingRecognitionRef.current = false;
+      startingRecognitionRef.current =
+        false;
+
+      setInterimText("");
 
       if (
-        shouldKeepRecordingRef.current
+        !shouldKeepRecordingRef.current
       ) {
-        setIsRecording(true);
-        setInterimText("");
+        setIsRecording(false);
+        return;
+      }
 
-        if (
-          restartingRecognitionRef.current
-        ) {
-          return;
-        }
+      setIsRecording(true);
 
-        restartingRecognitionRef.current = true;
+      if (
+        restartingRecognitionRef.current
+      ) {
+        return;
+      }
 
+      restartingRecognitionRef.current =
+        true;
+
+      if (restartTimerRef.current) {
+        clearTimeout(
+          restartTimerRef.current
+        );
+      }
+
+      restartTimerRef.current =
         setTimeout(() => {
-          restartingRecognitionRef.current = false;
+          restartTimerRef.current =
+            null;
+
+          restartingRecognitionRef.current =
+            false;
 
           if (
-            shouldKeepRecordingRef.current &&
-            recognitionRef.current === recognition
+            shouldKeepRecordingRef.current
           ) {
-            try {
-              recognition.start();
-              startingRecognitionRef.current = true;
-              setIsRecording(true);
-            } catch (error) {
-              console.error(
-                "Speech recognition restart error:",
-                error
-              );
-
-              startingRecognitionRef.current =
-                false;
-
-              if (
-                shouldKeepRecordingRef.current
-              ) {
-                setTimeout(() => {
-                  if (
-                    shouldKeepRecordingRef.current
-                  ) {
-                    startRecognition();
-                  }
-                }, 700);
-              }
-            }
+            startRecognition();
           }
-        }, 250);
-      } else {
-        setIsRecording(false);
-        setInterimText("");
-      }
+        }, 300);
     };
 
-    recognitionRef.current = recognition;
+    recognitionRef.current =
+      recognition;
 
     startRecognition();
   };
 
   useEffect(() => {
     return () => {
-      shouldKeepRecordingRef.current = false;
-      startingRecognitionRef.current = false;
-      restartingRecognitionRef.current = false;
+      shouldKeepRecordingRef.current =
+        false;
+
+      startingRecognitionRef.current =
+        false;
+
+      restartingRecognitionRef.current =
+        false;
+
+      if (restartTimerRef.current) {
+        clearTimeout(
+          restartTimerRef.current
+        );
+
+        restartTimerRef.current = null;
+      }
 
       try {
         recognitionRef.current?.stop();
       } catch {
-        // Ignore cleanup errors.
+        // Ignore.
       }
 
       recognitionRef.current = null;
@@ -784,7 +677,8 @@ function NoteDetailPage() {
   useEffect(() => {
     const fetchNote = async () => {
       if (id) {
-        const fetchedNote = await getNote(id);
+        const fetchedNote =
+          await getNote(id);
 
         if (fetchedNote) {
           setNote(fetchedNote);
@@ -836,7 +730,8 @@ function NoteDetailPage() {
   const handleDelete = async () => {
     if (!note) return;
 
-    const sucsess = await deleteNote(note.id);
+    const sucsess =
+      await deleteNote(note.id);
 
     if (sucsess) {
       navigate(path("/"));
@@ -863,7 +758,8 @@ function NoteDetailPage() {
     setAiLoading("summarize");
 
     try {
-      const token = await getToken();
+      const token =
+        await getToken();
 
       if (!token) {
         throw new Error(
@@ -873,10 +769,11 @@ function NoteDetailPage() {
         );
       }
 
-      const summary = await summarizeText(
-        token,
-        note.content
-      );
+      const summary =
+        await summarizeText(
+          token,
+          note.content
+        );
 
       setNote((prev) =>
         prev
@@ -924,7 +821,8 @@ function NoteDetailPage() {
     setAiLoading("rewrite");
 
     try {
-      const token = await getToken();
+      const token =
+        await getToken();
 
       if (!token) {
         throw new Error(
@@ -934,11 +832,12 @@ function NoteDetailPage() {
         );
       }
 
-      const rewritten = await rewriteText(
-        token,
-        note.content,
-        mode
-      );
+      const rewritten =
+        await rewriteText(
+          token,
+          note.content,
+          mode
+        );
 
       setNote((prev) =>
         prev
@@ -970,75 +869,78 @@ function NoteDetailPage() {
     }
   };
 
-  const handleTranslate = async () => {
-    if (!note?.content) {
-      toast.error(
-        formatMessage({
-          id: "toast.noTextTranslate",
-        })
-      );
-
-      return;
-    }
-
-    setAiLoading("translate");
-
-    try {
-      const token = await getToken();
-
-      if (!token) {
-        throw new Error(
+  const handleTranslate =
+    async () => {
+      if (!note?.content) {
+        toast.error(
           formatMessage({
-            id: "toast.loginRequired",
+            id: "toast.noTextTranslate",
           })
         );
+
+        return;
       }
 
-      const isArabic =
-        /[\u0600-\u06FF]/.test(
-          note.content
-        );
+      setAiLoading("translate");
 
-      const targetLang = isArabic
-        ? "English"
-        : "Arabic";
+      try {
+        const token =
+          await getToken();
 
-      const translation =
-        await translateText(
-          token,
-          note.content,
-          targetLang
-        );
-
-      setNote((prev) =>
-        prev
-          ? {
-              ...prev,
-              content: translation,
-            }
-          : null
-      );
-
-      setIsEditing(true);
-      setSaveStatus("unsaved");
-
-      toast.success(
-        formatMessage({
-          id: "toast.translateDone",
-        })
-      );
-    } catch (err) {
-      toast.error(
-        err instanceof Error
-          ? err.message
-          : formatMessage({
-              id: "toast.translateFailed",
+        if (!token) {
+          throw new Error(
+            formatMessage({
+              id: "toast.loginRequired",
             })
-      );
-    } finally {
-      setAiLoading(null);
-    }
-  };
+          );
+        }
+
+        const isArabic =
+          /[\u0600-\u06FF]/.test(
+            note.content
+          );
+
+        const targetLang =
+          isArabic
+            ? "English"
+            : "Arabic";
+
+        const translation =
+          await translateText(
+            token,
+            note.content,
+            targetLang
+          );
+
+        setNote((prev) =>
+          prev
+            ? {
+                ...prev,
+                content: translation,
+              }
+            : null
+        );
+
+        setIsEditing(true);
+        setSaveStatus("unsaved");
+
+        toast.success(
+          formatMessage({
+            id: "toast.translateDone",
+          })
+        );
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? err.message
+            : formatMessage({
+                id: "toast.translateFailed",
+              })
+        );
+      } finally {
+        setAiLoading(null);
+      }
+    };
 
   if (isLoading && !note) {
     return (
@@ -1048,11 +950,12 @@ function NoteDetailPage() {
     );
   }
 
-  const isArabicContent = note?.content
-    ? /[\u0600-\u06FF]/.test(
-        note.content
-      )
-    : false;
+  const isArabicContent =
+    note?.content
+      ? /[\u0600-\u06FF]/.test(
+          note.content
+        )
+      : false;
 
   return (
     <GlassCard className="p-4 flex flex-col gap-4">
@@ -1083,7 +986,9 @@ function NoteDetailPage() {
 
         <div>
           <DeleteBtn
-            handleDelete={handleDelete}
+            handleDelete={
+              handleDelete
+            }
             title={formatMessage({
               id: "note.deleteTitle",
             })}
@@ -1098,7 +1003,9 @@ function NoteDetailPage() {
         <div className="flex gap-2 btn-group flex-wrap">
           <div className="inline-flex items-center gap-1">
             <Button
-              onClick={handleRecordStart}
+              onClick={
+                handleRecordStart
+              }
               variant={
                 isRecording
                   ? "destructive"
@@ -1139,7 +1046,9 @@ function NoteDetailPage() {
           </div>
 
           <Button
-            onClick={handleSummarize}
+            onClick={
+              handleSummarize
+            }
             disabled={
               aiLoading !== null
             }
@@ -1165,7 +1074,9 @@ function NoteDetailPage() {
           />
 
           <Button
-            onClick={handleTranslate}
+            onClick={
+              handleTranslate
+            }
             disabled={
               aiLoading !== null
             }
@@ -1185,7 +1096,9 @@ function NoteDetailPage() {
 
       <div className="flex flex-col gap-4">
         <Input
-          value={note?.title || ""}
+          value={
+            note?.title || ""
+          }
           placeholder={formatMessage({
             id: "note.titlePlaceholder",
           })}
@@ -1204,13 +1117,16 @@ function NoteDetailPage() {
           placeholder={formatMessage({
             id: "note.contentPlaceholder",
           })}
-          value={note?.content || ""}
+          value={
+            note?.content || ""
+          }
           rows={30}
           onChange={
             handleTextareaChange
           }
           dir={
-            isArabicContent || isRtl
+            isArabicContent ||
+            isRtl
               ? "rtl"
               : "ltr"
           }
@@ -1222,3 +1138,4 @@ function NoteDetailPage() {
 }
 
 export default NoteDetailPage;
+

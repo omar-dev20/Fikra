@@ -126,7 +126,7 @@ function NoteDetailPage() {
     },
     []
   );
-
+  // الشرح الأول هو أن يتم تحويل النص إلى حروف صغيرة وإزالة المسافات والمسافات الخامة في النص  للتحقق من إنجاز مقارنة النص بشكل صحيح
   const normalizeForComparison =
     useCallback(
       (text: string) => {

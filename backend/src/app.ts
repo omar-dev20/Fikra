@@ -14,6 +14,10 @@ import userRouter from './routes/user';
 export function createApp(): Express {
   const app = express();
 
+  // =========================
+  // CORS
+  // =========================
+
   const allowedOrigins = [
     'https://khatera-ai.vercel.app',
     'http://localhost:5173',
@@ -22,19 +26,19 @@ export function createApp(): Express {
   app.use(
     cors({
       origin: (origin, callback) => {
-        // Allow requests with no origin
-        // (curl, server-to-server, mobile apps, etc.)
+        // Allow requests without an Origin header
+        // such as server-to-server requests.
         if (!origin) {
-          callback(null, true);
-          return;
+          return callback(null, true);
         }
 
         if (allowedOrigins.includes(origin)) {
-          callback(null, true);
-          return;
+          return callback(null, true);
         }
 
-        callback(new Error(`Not allowed by CORS: ${origin}`));
+        return callback(
+          new Error(`Not allowed by CORS: ${origin}`)
+        );
       },
 
       credentials: true,
@@ -52,11 +56,10 @@ export function createApp(): Express {
         'Content-Type',
         'Authorization',
       ],
+
+      optionsSuccessStatus: 204,
     })
   );
-
-  // Handle preflight requests
-  app.options('*', cors());
 
   // =========================
   // Body parser
@@ -65,7 +68,7 @@ export function createApp(): Express {
   app.use(express.json());
 
   // =========================
-  // Clerk
+  // Clerk authentication
   // =========================
 
   app.use(clerkMiddleware());

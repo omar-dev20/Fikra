@@ -1,5 +1,5 @@
 {
-  "app.title": "Fikra AI",
+  "app.title": " Khatera AI",
   "header.signIn": "Sign in",
   "header.signUp": "Sign up",
   "header.NoToken": "No token found. Sign in first to continue",
@@ -46,6 +46,6 @@
   "notFound.title": "This page drifted away",
   "notFound.description": "The route you are looking for does not exist yet.",
   "notFound.backHome": "Back to home",
-  "footer.copyright": "© {year} Fikra AI. All rights reserved. Created by Omar Soliman.",
+  "footer.copyright": "© {year} khatera-ai. All rights reserved. Created by Omar Soliman.",
   "theme.toggle": "Toggle theme"
 }

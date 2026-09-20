@@ -12,7 +12,6 @@ export function Header() {
   return (
     <header className="sticky top-0 z-50 w-full">
       <div className="mx-auto w-full max-w-6xl px-3 pt-3 sm:px-6 sm:pt-4 lg:px-8">
-        {/* Using glass class directly - header doesn't need rounded-2xl from glass-card */}
         <div className="glass-card flex flex-wrap items-center justify-between gap-2 rounded-2xl px-3 py-2 sm:gap-4 sm:px-6 sm:py-3">
           <div className="flex w-full items-center justify-center gap-2 sm:w-auto sm:justify-start sm:gap-3">
             <Link to={path("/")} className="text-lg font-semibold tracking-wide ">

@@ -15,7 +15,7 @@ export function createApp(): Express {
 
   // Middleware
   // Supports a single origin or a comma-separated list in FRONTEND_ORIGIN
-  // (e.g. "https://fikra-ochre.vercel.app,http://localhost:5173")
+  // (e.g. "https://khatera-ai.vercel.app,http://localhost:5173")
   const allowedOrigins = (config.frontendOrigin || '')
     .split(',')
     .map((o) => o.trim())

@@ -7,13 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useNotesAPI } from "@/hooks/useNotesApi";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams } from "react-router-dom";
-import {
-  Loader,
-  Mic,
-  Languages,
-  Sparkles,
-  Info,
-} from "lucide-react";
+import { Loader, Mic, Languages, Sparkles, Info } from "lucide-react";
 import { DeleteBtn } from "@/components/common/DelateBtn";
 import { toast } from "sonner";
 import AutoSave from "@/components/note/AutoSave";
@@ -36,7 +30,10 @@ function NoteDetailPage() {
   const { formatMessage } = useIntl();
   const { isRtl, lang, path } = useLang();
 
-  const handleClick = () => {
+  const handleClick = async () => {
+    if (isEditing && note) {
+      await handleSave();
+    }
     navigate(path("/"));
   };
 
@@ -47,171 +44,148 @@ function NoteDetailPage() {
   const [note, setNote] = useState<Note | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
-  const [rewriteMode, setRewriteMode] =
-    useState<RewriteMode>();
-  const [aiLoading, setAiLoading] =
-    useState<string | null>(null);
+  const [rewriteMode, setRewriteMode] = useState<RewriteMode>();
+  const [aiLoading, setAiLoading] = useState<string | null>(null);
 
-  const [isRecording, setIsRecording] =
-    useState(false);
-  const [interimText, setInterimText] =
-    useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [interimText, setInterimText] = useState("");
 
-  const recognitionRef =
-    useRef<SpeechRecognition | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
 
-  const shouldKeepRecordingRef =
-    useRef(false);
+  const shouldKeepRecordingRef = useRef(false);
 
-  const startingRecognitionRef =
-    useRef(false);
+  const startingRecognitionRef = useRef(false);
 
-  const restartingRecognitionRef =
-    useRef(false);
+  const restartingRecognitionRef = useRef(false);
 
-  const finalResultsRef =
-    useRef<Record<number, string>>({});
+  const finalResultsRef = useRef<Record<number, string>>({});
 
-  const finalResultOrderRef =
-    useRef<number[]>([]);
+  const finalResultOrderRef = useRef<number[]>([]);
 
-  const lastAppendedFinalRef =
-    useRef("");
+  const lastAppendedFinalRef = useRef("");
 
-  const restartTimerRef =
-    useRef<ReturnType<typeof setTimeout> | null>(
-      null
-    );
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const noteRef = useRef<Note | null>(null);
+const saveRequestRef = useRef(0);
 
   const micTooltipText =
     lang === "ar"
       ? "المايك بينقل صوتك للغة العربية، لو الموقع شغال إنجليزي هيتكتب الكلام إنجليزي"
       : "The mic transcribes based on the site's current language";
+useEffect(() => {
+  noteRef.current = note;
+}, [note]);
+const handleSave = useCallback(async () => {
+  const currentNote = noteRef.current;
 
-  const handleSave = useCallback(async () => {
-    if (!note) return;
+  if (!currentNote) return;
 
-    setSaveStatus("saving");
+  const requestId = ++saveRequestRef.current;
 
-    const minDelay = new Promise((resolve) =>
-      setTimeout(resolve, 500)
-    );
+  setSaveStatus("saving");
 
-    const [updatedNote] = await Promise.all([
-      saveNote(note.id, {
-        title: note.title,
-        content: note.content,
-      }),
-      minDelay,
-    ]);
+  const snapshot = {
+    title: currentNote.title,
+    content: currentNote.content,
+  };
 
-    if (updatedNote) {
-      setNote(updatedNote);
-      setIsEditing(false);
-      setSaveStatus("saved");
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note, saveNote]);
+  const minDelay = new Promise((resolve) => setTimeout(resolve, 500));
 
-  const { saveStatus, setSaveStatus } =
-    useNoteSave({
-      note,
-      isEditing,
-      handleSave,
-    });
+  const [updatedNote] = await Promise.all([
+    saveNote(currentNote.id, snapshot),
+    minDelay,
+  ]);
 
-  const normalizeText = useCallback(
-    (text: string) => {
-      return text.replace(/\s+/g, " ").trim();
-    },
-    []
-  );
+  if (!updatedNote) return;
+
+  if (requestId !== saveRequestRef.current) {
+    return;
+  }
+
+  const latestNote = noteRef.current;
+
+  if (!latestNote) return;
+
+  const hasNewerChanges =
+    latestNote.title !== snapshot.title ||
+    latestNote.content !== snapshot.content;
+
+  if (hasNewerChanges) {
+    return;
+  }
+
+  setNote(updatedNote);
+  setIsEditing(false);
+  setSaveStatus("saved");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [saveNote]);
+
+  const { saveStatus, setSaveStatus } = useNoteSave({
+    note,
+    isEditing,
+    handleSave,
+  });
+
+  const normalizeText = useCallback((text: string) => {
+    return text.replace(/\s+/g, " ").trim();
+  }, []);
   // الشرح الأول هو أن يتم تحويل النص إلى حروف صغيرة وإزالة المسافات والمسافات الخامة في النص  للتحقق من إنجاز مقارنة النص بشكل صحيح
-  const normalizeForComparison =
-    useCallback(
-      (text: string) => {
-        return normalizeText(text)
-          .toLowerCase()
-          .replace(/[.!؟?،,؛;:]+$/g, "")
-          .trim();
-      },
-      [normalizeText]
-    );
+  const normalizeForComparison = useCallback(
+    (text: string) => {
+      return normalizeText(text)
+        .toLowerCase()
+        .replace(/[.!؟?،,؛;:]+$/g, "")
+        .trim();
+    },
+    [normalizeText],
+  );
 
   const getOverlapText = useCallback(
-    (
-      existingText: string,
-      incomingText: string
-    ) => {
-      const existing =
-        normalizeText(existingText);
-      const incoming =
-        normalizeText(incomingText);
+    (existingText: string, incomingText: string) => {
+      const existing = normalizeText(existingText);
+      const incoming = normalizeText(incomingText);
 
       if (!existing || !incoming) {
         return incoming;
       }
 
-      const existingWords =
-        existing.split(/\s+/);
-      const incomingWords =
-        incoming.split(/\s+/);
+      const existingWords = existing.split(/\s+/);
+      const incomingWords = incoming.split(/\s+/);
 
-      const maxOverlap = Math.min(
-        existingWords.length,
-        incomingWords.length
-      );
+      const maxOverlap = Math.min(existingWords.length, incomingWords.length);
 
-      for (
-        let count = maxOverlap;
-        count >= 1;
-        count--
-      ) {
-        const oldPart = existingWords
-          .slice(-count)
-          .join(" ");
+      for (let count = maxOverlap; count >= 1; count--) {
+        const oldPart = existingWords.slice(-count).join(" ");
 
-        const newPart = incomingWords
-          .slice(0, count)
-          .join(" ");
+        const newPart = incomingWords.slice(0, count).join(" ");
 
         if (
-          normalizeForComparison(oldPart) ===
-          normalizeForComparison(newPart)
+          normalizeForComparison(oldPart) === normalizeForComparison(newPart)
         ) {
-          return incomingWords
-            .slice(count)
-            .join(" ")
-            .trim();
+          return incomingWords.slice(count).join(" ").trim();
         }
       }
 
       return incoming;
     },
-    [normalizeText, normalizeForComparison]
+    [normalizeText, normalizeForComparison],
   );
 
   const appendFinalText = useCallback(
     (text: string) => {
-      const cleanText =
-        normalizeText(text);
+      const cleanText = normalizeText(text);
 
       if (!cleanText) {
         return;
       }
 
-      const normalizedIncoming =
-        normalizeForComparison(cleanText);
+      const normalizedIncoming = normalizeForComparison(cleanText);
 
-      const normalizedLast =
-        normalizeForComparison(
-          lastAppendedFinalRef.current
-        );
+      const normalizedLast = normalizeForComparison(
+        lastAppendedFinalRef.current,
+      );
 
-      if (
-        normalizedIncoming &&
-        normalizedIncoming === normalizedLast
-      ) {
+      if (normalizedIncoming && normalizedIncoming === normalizedLast) {
         return;
       }
 
@@ -220,40 +194,27 @@ function NoteDetailPage() {
           return null;
         }
 
-        const currentContent =
-          normalizeText(prev.content || "");
+        const currentContent = normalizeText(prev.content || "");
 
         let textToAdd = cleanText;
 
         if (currentContent) {
-          textToAdd = getOverlapText(
-            currentContent,
-            textToAdd
-          );
+          textToAdd = getOverlapText(currentContent, textToAdd);
         }
 
-        textToAdd =
-          normalizeText(textToAdd);
+        textToAdd = normalizeText(textToAdd);
 
         if (!textToAdd) {
           return prev;
         }
 
-        const currentNormalized =
-          normalizeForComparison(
-            currentContent
-          );
+        const currentNormalized = normalizeForComparison(currentContent);
 
-        const incomingNormalized =
-          normalizeForComparison(
-            textToAdd
-          );
+        const incomingNormalized = normalizeForComparison(textToAdd);
 
         if (
           incomingNormalized &&
-          currentNormalized.endsWith(
-            incomingNormalized
-          )
+          currentNormalized.endsWith(incomingNormalized)
         ) {
           return prev;
         }
@@ -266,37 +227,27 @@ function NoteDetailPage() {
         };
       });
 
-      lastAppendedFinalRef.current =
-        cleanText;
+      lastAppendedFinalRef.current = cleanText;
 
       setIsEditing(true);
       setSaveStatus("unsaved");
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [
-      normalizeText,
-      normalizeForComparison,
-      getOverlapText,
-    ]
+    [normalizeText, normalizeForComparison, getOverlapText],
   );
 
   const startRecognition = useCallback(() => {
-    const recognition =
-      recognitionRef.current;
+    const recognition = recognitionRef.current;
 
     if (!recognition) {
       return;
     }
 
-    if (
-      !shouldKeepRecordingRef.current
-    ) {
+    if (!shouldKeepRecordingRef.current) {
       return;
     }
 
-    if (
-      startingRecognitionRef.current
-    ) {
+    if (startingRecognitionRef.current) {
       return;
     }
 
@@ -306,49 +257,32 @@ function NoteDetailPage() {
       recognition.start();
       setIsRecording(true);
     } catch (error) {
-      startingRecognitionRef.current =
-        false;
+      startingRecognitionRef.current = false;
 
-      console.error(
-        "Speech recognition start error:",
-        error
-      );
+      console.error("Speech recognition start error:", error);
 
-      if (
-        shouldKeepRecordingRef.current
-      ) {
-        if (
-          restartTimerRef.current
-        ) {
-          clearTimeout(
-            restartTimerRef.current
-          );
+      if (shouldKeepRecordingRef.current) {
+        if (restartTimerRef.current) {
+          clearTimeout(restartTimerRef.current);
         }
 
-        restartTimerRef.current =
-          setTimeout(() => {
-            restartTimerRef.current =
-              null;
+        restartTimerRef.current = setTimeout(() => {
+          restartTimerRef.current = null;
 
-            if (
-              shouldKeepRecordingRef.current
-            ) {
-              startRecognition();
-            }
-          }, 500);
+          if (shouldKeepRecordingRef.current) {
+            startRecognition();
+          }
+        }, 500);
       }
     }
   }, []);
 
   const handleRecordStart = () => {
     if (isRecording) {
-      shouldKeepRecordingRef.current =
-        false;
+      shouldKeepRecordingRef.current = false;
 
       if (restartTimerRef.current) {
-        clearTimeout(
-          restartTimerRef.current
-        );
+        clearTimeout(restartTimerRef.current);
 
         restartTimerRef.current = null;
       }
@@ -356,10 +290,7 @@ function NoteDetailPage() {
       try {
         recognitionRef.current?.stop();
       } catch (error) {
-        console.error(
-          "Speech recognition stop error:",
-          error
-        );
+        console.error("Speech recognition stop error:", error);
       }
 
       setIsRecording(false);
@@ -380,16 +311,14 @@ function NoteDetailPage() {
       alert(
         formatMessage({
           id: "note.speechUnsupported",
-        })
+        }),
       );
 
       return;
     }
 
     if (restartTimerRef.current) {
-      clearTimeout(
-        restartTimerRef.current
-      );
+      clearTimeout(restartTimerRef.current);
 
       restartTimerRef.current = null;
     }
@@ -404,138 +333,76 @@ function NoteDetailPage() {
     finalResultOrderRef.current = [];
     lastAppendedFinalRef.current = "";
 
-    startingRecognitionRef.current =
-      false;
+    startingRecognitionRef.current = false;
 
-    restartingRecognitionRef.current =
-      false;
+    restartingRecognitionRef.current = false;
 
-    shouldKeepRecordingRef.current =
-      true;
+    shouldKeepRecordingRef.current = true;
 
     setInterimText("");
 
-    const recognition =
-      new SpeechRecognitionAPI();
+    const recognition = new SpeechRecognitionAPI();
 
-    recognition.lang =
-      lang === "ar"
-        ? "ar-EG"
-        : "en-US";
+    recognition.lang = lang === "ar" ? "ar-EG" : "en-US";
 
     recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 1;
 
-    recognition.onresult = (
-      event: SpeechRecognitionEvent
-    ) => {
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
       let interim = "";
 
-      const startIndex =
-        Math.max(
-          0,
-          event.resultIndex
-        );
+      const startIndex = Math.max(0, event.resultIndex);
 
-      for (
-        let i = startIndex;
-        i < event.results.length;
-        i++
-      ) {
-        const result =
-          event.results[i];
+      for (let i = startIndex; i < event.results.length; i++) {
+        const result = event.results[i];
 
-        if (
-          !result ||
-          !result[0]
-        ) {
+        if (!result || !result[0]) {
           continue;
         }
 
-        const transcript =
-          normalizeText(
-            result[0].transcript || ""
-          );
+        const transcript = normalizeText(result[0].transcript || "");
 
         if (!transcript) {
           continue;
         }
 
         if (result.isFinal) {
-          const previous =
-            finalResultsRef.current[i];
+          const previous = finalResultsRef.current[i];
 
-          const currentNormalized =
-            normalizeForComparison(
-              transcript
-            );
+          const currentNormalized = normalizeForComparison(transcript);
 
-          const previousNormalized =
-            normalizeForComparison(
-              previous || ""
-            );
+          const previousNormalized = normalizeForComparison(previous || "");
 
-          if (
-            previous &&
-            currentNormalized ===
-              previousNormalized
-          ) {
+          if (previous && currentNormalized === previousNormalized) {
             continue;
           }
 
-          if (
-            previous &&
-            transcript.startsWith(
-              previous
-            )
-          ) {
-            const difference =
-              transcript
-                .slice(previous.length)
-                .trim();
+          if (previous && transcript.startsWith(previous)) {
+            const difference = transcript.slice(previous.length).trim();
 
-            finalResultsRef.current[i] =
-              transcript;
+            finalResultsRef.current[i] = transcript;
 
             if (difference) {
-              appendFinalText(
-                difference
-              );
+              appendFinalText(difference);
             }
           } else if (!previous) {
-            finalResultsRef.current[i] =
-              transcript;
+            finalResultsRef.current[i] = transcript;
 
-            finalResultOrderRef.current.push(
-              i
-            );
+            finalResultOrderRef.current.push(i);
 
-            appendFinalText(
-              transcript
-            );
+            appendFinalText(transcript);
           } else {
-            finalResultsRef.current[i] =
-              transcript;
+            finalResultsRef.current[i] = transcript;
 
-            const overlap =
-              getOverlapText(
-                previous,
-                transcript
-              );
+            const overlap = getOverlapText(previous, transcript);
 
             if (
               overlap &&
-              normalizeForComparison(
-                overlap
-              ) !==
-                normalizeForComparison(
-                  previous
-                )
+              normalizeForComparison(overlap) !==
+                normalizeForComparison(previous)
             ) {
-              appendFinalText(
-                overlap
-              );
+              appendFinalText(overlap);
             }
           }
         } else {
@@ -543,30 +410,19 @@ function NoteDetailPage() {
         }
       }
 
-      setInterimText(
-        normalizeText(interim)
-      );
+      setInterimText(normalizeText(interim));
     };
 
-    recognition.onerror = (
-      event: SpeechRecognitionErrorEvent
-    ) => {
-      console.error(
-        "Speech recognition error:",
-        event.error
-      );
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      console.error("Speech recognition error:", event.error);
 
-      startingRecognitionRef.current =
-        false;
+      startingRecognitionRef.current = false;
 
       if (
-        event.error ===
-          "not-allowed" ||
-        event.error ===
-          "service-not-allowed"
+        event.error === "not-allowed" ||
+        event.error === "service-not-allowed"
       ) {
-        shouldKeepRecordingRef.current =
-          false;
+        shouldKeepRecordingRef.current = false;
 
         setIsRecording(false);
         setInterimText("");
@@ -574,93 +430,69 @@ function NoteDetailPage() {
         toast.error(
           formatMessage({
             id: "note.speechUnsupported",
-          })
+          }),
         );
 
         return;
       }
 
       if (
-        event.error ===
-          "no-speech" ||
-        event.error ===
-          "network" ||
-        event.error ===
-          "audio-capture"
+        event.error === "no-speech" ||
+        event.error === "network" ||
+        event.error === "audio-capture"
       ) {
-        setIsRecording(
-          shouldKeepRecordingRef.current
-        );
+        setIsRecording(shouldKeepRecordingRef.current);
       }
     };
 
     recognition.onend = () => {
-      startingRecognitionRef.current =
-        false;
+      startingRecognitionRef.current = false;
 
       setInterimText("");
 
-      if (
-        !shouldKeepRecordingRef.current
-      ) {
+      if (!shouldKeepRecordingRef.current) {
         setIsRecording(false);
         return;
       }
 
       setIsRecording(true);
 
-      if (
-        restartingRecognitionRef.current
-      ) {
+      if (restartingRecognitionRef.current) {
         return;
       }
 
-      restartingRecognitionRef.current =
-        true;
+      restartingRecognitionRef.current = true;
 
       if (restartTimerRef.current) {
-        clearTimeout(
-          restartTimerRef.current
-        );
+        clearTimeout(restartTimerRef.current);
       }
 
-      restartTimerRef.current =
-        setTimeout(() => {
-          restartTimerRef.current =
-            null;
+      restartTimerRef.current = setTimeout(() => {
+        restartTimerRef.current = null;
 
-          restartingRecognitionRef.current =
-            false;
+        restartingRecognitionRef.current = false;
 
-          if (
-            shouldKeepRecordingRef.current
-          ) {
-            startRecognition();
-          }
-        }, 300);
+        if (shouldKeepRecordingRef.current) {
+          startRecognition();
+        }
+      }, 300);
     };
 
-    recognitionRef.current =
-      recognition;
+    recognitionRef.current = recognition;
 
     startRecognition();
   };
 
   useEffect(() => {
     return () => {
-      shouldKeepRecordingRef.current =
-        false;
+      shouldKeepRecordingRef.current = false;
 
-      startingRecognitionRef.current =
-        false;
+      startingRecognitionRef.current = false;
 
-      restartingRecognitionRef.current =
-        false;
+      restartingRecognitionRef.current = false;
 
       if (restartTimerRef.current) {
-        clearTimeout(
-          restartTimerRef.current
-        );
+        clearTimeout(restartTimerRef.current);
 
         restartTimerRef.current = null;
       }
@@ -678,8 +510,7 @@ function NoteDetailPage() {
   useEffect(() => {
     const fetchNote = async () => {
       if (id) {
-        const fetchedNote =
-          await getNote(id);
+        const fetchedNote = await getNote(id);
 
         if (fetchedNote) {
           setNote(fetchedNote);
@@ -692,9 +523,7 @@ function NoteDetailPage() {
     fetchNote();
   }, [id, getNote]);
 
-  const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>
-  ) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!note) return;
 
     setNote((prev) =>
@@ -703,16 +532,14 @@ function NoteDetailPage() {
             ...prev,
             title: e.target.value,
           }
-        : null
+        : null,
     );
 
     setIsEditing(true);
     setSaveStatus("unsaved");
   };
 
-  const handleTextareaChange = (
-    e: React.ChangeEvent<HTMLTextAreaElement>
-  ) => {
+  const handleTextareaChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (!note) return;
 
     setNote((prev) =>
@@ -721,7 +548,7 @@ function NoteDetailPage() {
             ...prev,
             content: e.target.value,
           }
-        : null
+        : null,
     );
 
     setIsEditing(true);
@@ -731,8 +558,7 @@ function NoteDetailPage() {
   const handleDelete = async () => {
     if (!note) return;
 
-    const sucsess =
-      await deleteNote(note.id);
+    const sucsess = await deleteNote(note.id);
 
     if (sucsess) {
       navigate(path("/"));
@@ -740,7 +566,7 @@ function NoteDetailPage() {
       toast.success(
         formatMessage({
           id: "toast.deleted",
-        })
+        }),
       );
     }
   };
@@ -750,7 +576,7 @@ function NoteDetailPage() {
       toast.error(
         formatMessage({
           id: "toast.noTextSummarize",
-        })
+        }),
       );
 
       return;
@@ -759,22 +585,17 @@ function NoteDetailPage() {
     setAiLoading("summarize");
 
     try {
-      const token =
-        await getToken();
+      const token = await getToken();
 
       if (!token) {
         throw new Error(
           formatMessage({
             id: "toast.loginRequired",
-          })
+          }),
         );
       }
 
-      const summary =
-        await summarizeText(
-          token,
-          note.content
-        );
+      const summary = await summarizeText(token, note.content);
 
       setNote((prev) =>
         prev
@@ -782,7 +603,7 @@ function NoteDetailPage() {
               ...prev,
               content: summary,
             }
-          : null
+          : null,
       );
 
       setIsEditing(true);
@@ -791,7 +612,7 @@ function NoteDetailPage() {
       toast.success(
         formatMessage({
           id: "toast.summaryDone",
-        })
+        }),
       );
     } catch (err) {
       toast.error(
@@ -799,21 +620,19 @@ function NoteDetailPage() {
           ? err.message
           : formatMessage({
               id: "toast.summarizeFailed",
-            })
+            }),
       );
     } finally {
       setAiLoading(null);
     }
   };
 
-  const handleRewrite = async (
-    mode: RewriteMode
-  ) => {
+  const handleRewrite = async (mode: RewriteMode) => {
     if (!note?.content) {
       toast.error(
         formatMessage({
           id: "toast.noTextRewrite",
-        })
+        }),
       );
 
       return;
@@ -822,23 +641,17 @@ function NoteDetailPage() {
     setAiLoading("rewrite");
 
     try {
-      const token =
-        await getToken();
+      const token = await getToken();
 
       if (!token) {
         throw new Error(
           formatMessage({
             id: "toast.loginRequired",
-          })
+          }),
         );
       }
 
-      const rewritten =
-        await rewriteText(
-          token,
-          note.content,
-          mode
-        );
+      const rewritten = await rewriteText(token, note.content, mode);
 
       setNote((prev) =>
         prev
@@ -846,7 +659,7 @@ function NoteDetailPage() {
               ...prev,
               content: rewritten,
             }
-          : null
+          : null,
       );
 
       setIsEditing(true);
@@ -855,7 +668,7 @@ function NoteDetailPage() {
       toast.success(
         formatMessage({
           id: "toast.rewriteDone",
-        })
+        }),
       );
     } catch (err) {
       toast.error(
@@ -863,85 +676,72 @@ function NoteDetailPage() {
           ? err.message
           : formatMessage({
               id: "toast.rewriteFailed",
-            })
+            }),
       );
     } finally {
       setAiLoading(null);
     }
   };
 
-  const handleTranslate =
-    async () => {
-      if (!note?.content) {
-        toast.error(
-          formatMessage({
-            id: "toast.noTextTranslate",
-          })
-        );
+  const handleTranslate = async () => {
+    if (!note?.content) {
+      toast.error(
+        formatMessage({
+          id: "toast.noTextTranslate",
+        }),
+      );
 
-        return;
+      return;
+    }
+
+    setAiLoading("translate");
+
+    try {
+      const token = await getToken();
+
+      if (!token) {
+        throw new Error(
+          formatMessage({
+            id: "toast.loginRequired",
+          }),
+        );
       }
 
-      setAiLoading("translate");
+      const isArabic = /[\u0600-\u06FF]/.test(note.content);
 
-      try {
-        const token =
-          await getToken();
+      const targetLang = isArabic ? "English" : "Arabic";
 
-        if (!token) {
-          throw new Error(
-            formatMessage({
-              id: "toast.loginRequired",
-            })
-          );
-        }
+      const translation = await translateText(token, note.content, targetLang);
 
-        const isArabic =
-          /[\u0600-\u06FF]/.test(
-            note.content
-          );
+      setNote((prev) =>
+        prev
+          ? {
+              ...prev,
+              content: translation,
+            }
+          : null,
+      );
 
-        const targetLang =
-          isArabic
-            ? "English"
-            : "Arabic";
+      setIsEditing(true);
+      setSaveStatus("unsaved");
 
-        const translation =
-          await translateText(
-            token,
-            note.content,
-            targetLang
-          );
-
-        setNote((prev) =>
-          prev
-            ? {
-                ...prev,
-                content: translation,
-              }
-            : null
-        );
-
-        setIsEditing(true);
-        setSaveStatus("unsaved");
-
-        toast.success(
-          formatMessage({
-            id: "toast.translateDone",
-          })
-        );
-      } catch (err) {
-        toast.error(
-          err instanceof Error
-            ? err.message
-            : formatMessage({
-                id: "toast.translateFailed",
-              })
-        );
-      } finally {
-        setAiLoading(null);
-      }
-    };
+      toast.success(
+        formatMessage({
+          id: "toast.translateDone",
+        }),
+      );
+    } catch (err) {
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : formatMessage({
+              id: "toast.translateFailed",
+            }),
+      );
+    } finally {
+      setAiLoading(null);
+    }
+  };
 
   if (isLoading && !note) {
     return (
@@ -951,45 +751,28 @@ function NoteDetailPage() {
     );
   }
 
-  const isArabicContent =
-    note?.content
-      ? /[\u0600-\u06FF]/.test(
-          note.content
-        )
-      : false;
+  const isArabicContent = note?.content
+    ? /[\u0600-\u06FF]/.test(note.content)
+    : false;
 
   return (
     <GlassCard className="p-4 flex flex-col gap-4">
       <div className="flex justify-between items-center flex-wrap gap-2">
         <div className="flex gap-2 items-center">
-          <Button
-            className="w-fit"
-            onClick={handleClick}
-            variant="outline"
-          >
-            <ArrowLeft
-              className={
-                isRtl
-                  ? "rotate-180"
-                  : ""
-              }
-            />
+          <Button className="w-fit" onClick={handleClick} variant="outline">
+            <ArrowLeft className={isRtl ? "rotate-180" : ""} />
 
             {formatMessage({
               id: "note.back",
             })}
           </Button>
 
-          <AutoSave
-            saveStatus={saveStatus}
-          />
+          <AutoSave saveStatus={saveStatus} />
         </div>
 
         <div>
           <DeleteBtn
-            handleDelete={
-              handleDelete
-            }
+            handleDelete={handleDelete}
             title={formatMessage({
               id: "note.deleteTitle",
             })}
@@ -1004,28 +787,18 @@ function NoteDetailPage() {
         <div className="flex gap-2 btn-group flex-wrap">
           <div className="inline-flex items-center gap-1">
             <Button
-              onClick={
-                handleRecordStart
-              }
-              variant={
-                isRecording
-                  ? "destructive"
-                  : "default"
-              }
+              onClick={handleRecordStart}
+              variant={isRecording ? "destructive" : "default"}
             >
               {isRecording ? (
-                <span className="animate-pulse">
-                  🔴
-                </span>
+                <span className="animate-pulse">🔴</span>
               ) : (
                 <Mic />
               )}
 
               <span>
                 {formatMessage({
-                  id: isRecording
-                    ? "note.recording"
-                    : "note.speak",
+                  id: isRecording ? "note.recording" : "note.speak",
                 })}
               </span>
             </Button>
@@ -1033,11 +806,7 @@ function NoteDetailPage() {
             <button
               type="button"
               aria-label="info"
-              onClick={() =>
-                toast.info(
-                  micTooltipText
-                )
-              }
+              onClick={() => toast.info(micTooltipText)}
               className="flex items-center justify-center h-6 w-6 rounded-full
                          text-muted-foreground hover:text-foreground
                          focus:outline-none focus:ring-2 focus:ring-ring"
@@ -1047,20 +816,15 @@ function NoteDetailPage() {
           </div>
 
           <Button
-            onClick={
-              handleSummarize
-            }
-            disabled={
-              aiLoading !== null
-            }
+            onClick={handleSummarize}
+            disabled={aiLoading !== null}
             variant="outline"
           >
             <Sparkles />
 
             {formatMessage({
               id:
-                aiLoading ===
-                "summarize"
+                aiLoading === "summarize"
                   ? "note.summarizing"
                   : "note.summarize",
             })}
@@ -1074,20 +838,12 @@ function NoteDetailPage() {
             }}
           />
 
-          <Button
-            onClick={
-              handleTranslate
-            }
-            disabled={
-              aiLoading !== null
-            }
-          >
+          <Button onClick={handleTranslate} disabled={aiLoading !== null}>
             <Languages />
 
             {formatMessage({
               id:
-                aiLoading ===
-                "translate"
+                aiLoading === "translate"
                   ? "note.translating"
                   : "note.translate",
             })}
@@ -1097,9 +853,7 @@ function NoteDetailPage() {
 
       <div className="flex flex-col gap-4">
         <Input
-          value={
-            note?.title || ""
-          }
+          value={note?.title || ""}
           placeholder={formatMessage({
             id: "note.titlePlaceholder",
           })}
@@ -1107,30 +861,20 @@ function NoteDetailPage() {
           className="focus-plain w-full bg-transparent text-4xl! p-2 h-15 font-bold"
         />
 
-        {isRecording &&
-          interimText && (
-            <p className="hidden sm:block text-sm text-muted-foreground italic animate-pulse">
-              {interimText}
-            </p>
-          )}
+        {isRecording && interimText && (
+          <p className="hidden sm:block text-sm text-muted-foreground italic animate-pulse">
+            {interimText}
+          </p>
+        )}
 
         <Textarea
           placeholder={formatMessage({
             id: "note.contentPlaceholder",
           })}
-          value={
-            note?.content || ""
-          }
+          value={note?.content || ""}
           rows={30}
-          onChange={
-            handleTextareaChange
-          }
-          dir={
-            isArabicContent ||
-            isRtl
-              ? "rtl"
-              : "ltr"
-          }
+          onChange={handleTextareaChange}
+          dir={isArabicContent || isRtl ? "rtl" : "ltr"}
           className="focus-plain w-full !border-none bg-transparent dark:bg-transparent min-h-[400px]"
         />
       </div>
@@ -1139,4 +883,3 @@ function NoteDetailPage() {
 }
 
 export default NoteDetailPage;
-

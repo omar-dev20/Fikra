@@ -11,7 +11,6 @@ interface NoteAttributes {
   updatedAt?: Date;
 }
 
-// الحقول دي اختيارية وقت الإنشاء (بتتحدد تلقائي أو ممكن متتبعتش)
 type NoteCreationAttributes = Optional<NoteAttributes, 'id' | 'summary' | 'createdAt' | 'updatedAt'>;
 
 export class Note extends Model<NoteAttributes, NoteCreationAttributes> implements NoteAttributes {
